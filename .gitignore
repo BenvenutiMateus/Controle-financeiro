@@ -1,1 +1,9 @@
+# Ignora o banco de dados local para não subir pro GitHub
 financeiro.db
+*.db
+
+# Ignora senhas e chaves locais
+.env
+.secrets.toml
+secrets.toml
+.venv/
