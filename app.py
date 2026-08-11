@@ -126,8 +126,9 @@ if st.session_state["user"] is None:
     aba_login, aba_cadastro = st.tabs(["Login", "Criar Conta"])
     with aba_login:
         with st.form("form_login"):
-            usuario = st.text_input("Usuário / E-mail")
-            senha = st.text_input("Senha", type="password")
+            # O atributo autocomplete ativa o preenchimento automático/salvamento do navegador
+            usuario = st.text_input("Usuário / E-mail", autocomplete="username")
+            senha = st.text_input("Senha", type="password", autocomplete="current-password")
             if st.form_submit_button("Entrar"):
                 user = autenticar_usuario(usuario, senha)
                 if user:
@@ -138,9 +139,9 @@ if st.session_state["user"] is None:
                     
     with aba_cadastro:
         with st.form("form_cadastro"):
-            novo_usuario = st.text_input("Usuário / E-mail")
+            novo_usuario = st.text_input("Usuário / E-mail", autocomplete="new-username")
             novo_nome = st.text_input("Seu Nome")
-            nova_senha = st.text_input("Senha", type="password")
+            nova_senha = st.text_input("Senha", type="password", autocomplete="new-password")
             if st.form_submit_button("Criar Conta"):
                 if cadastrar_usuario(novo_usuario, novo_nome, nova_senha):
                     st.success("Conta criada! Faça login.")
@@ -160,51 +161,102 @@ if st.sidebar.button("Sair"):
     st.rerun()
 
 st.sidebar.divider()
-menu = st.sidebar.radio("Navegação", ["Dashboard (Gráficos)", "Todas as Contas (Editável)", "Novo Lançamento", "Gerar Recorrentes Futuras"])
+menu = st.sidebar.radio("Navegação", ["Dashboard Analytics", "Todas as Contas (Editável)", "Novo Lançamento", "Gerar Recorrentes Futuras"])
 
 # ==========================================
-# DASHBOARD COM GRÁFICOS
+# DASHBOARD ANALYTICS
 # ==========================================
-if menu == "Dashboard (Gráficos)":
-    st.header("📈 Dashboard Financeiro")
+if menu == "Dashboard Analytics":
+    st.header("📈 Dashboard Analytics & Tendências")
     
     col_f1, col_f2 = st.columns(2)
     filtro_mes = col_f1.selectbox("Selecione o Mês", list(range(1, 13)), index=datetime.date.today().month - 1)
     filtro_ano = col_f2.number_input("Ano", min_value=2024, max_value=2030, value=datetime.date.today().year)
     
     conn = get_connection()
-    # CORREÇÃO: params como Tupla
-    df = pd.read_sql_query("""
+    df_mes = pd.read_sql_query("""
         SELECT * FROM lancamentos 
         WHERE user_id = ? AND strftime('%m', data) = ? AND strftime('%Y', data) = ?
     """, conn, params=(user_id, f"{filtro_mes:02d}", str(filtro_ano)))
+    
+    df_ano = pd.read_sql_query("""
+        SELECT data, valor, valor_pago, status, categoria FROM lancamentos 
+        WHERE user_id = ? AND strftime('%Y', data) = ?
+    """, conn, params=(user_id, str(filtro_ano)))
     conn.close()
     
-    if df.empty:
-        st.info("Nenhum lançamento encontrado para este período.")
+    if df_mes.empty:
+        st.info("Nenhum lançamento encontrado para este mês.")
     else:
-        tot_previsto = df["valor"].sum()
-        tot_pago = df["valor_pago"].sum()
-        pendente = tot_previsto - tot_pago
+        hoje = datetime.date.today()
+        df_mes["dt_data"] = pd.to_datetime(df_mes["data"]).dt.date
         
-        m1, m2, m3 = st.columns(3)
+        def classificar_alerta(row):
+            if row["status"] == "Pago":
+                return "🟢 Pago"
+            elif row["dt_data"] < hoje:
+                return "🔴 Atrasado"
+            else:
+                return "🟡 A Pagar (No Prazo)"
+
+        df_mes["Alerta"] = df_mes.apply(classificar_alerta, axis=1)
+        
+        tot_previsto = df_mes["valor"].sum()
+        tot_pago = df_mes["valor_pago"].sum()
+        tot_atrasado = df_mes[df_mes["Alerta"] == "🔴 Atrasado"]["valor"].sum()
+        tot_a_vencer = df_mes[df_mes["Alerta"] == "🟡 A Pagar (No Prazo)"]["valor"].sum()
+        
+        m1, m2, m3, m4 = st.columns(4)
         m1.metric("Total Previsto", f"R$ {tot_previsto:,.2f}")
-        m2.metric("Total Pago", f"R$ {tot_pago:,.2f}")
-        m3.metric("Falta Pagar", f"R$ {pendente:,.2f}", delta_color="inverse")
+        m2.metric("Total Pago (🟢)", f"R$ {tot_pago:,.2f}")
+        m3.metric("A Pagar no Prazo (🟡)", f"R$ {tot_a_vencer:,.2f}")
+        m4.metric("Em Atraso (🔴)", f"R$ {tot_atrasado:,.2f}", delta_color="inverse")
         
         st.divider()
         col_g1, col_g2 = st.columns(2)
         
         with col_g1:
-            st.subheader("🍕 Distribuição por Categoria")
-            df_cat = df.groupby("categoria")["valor"].sum().reset_index()
-            fig_pizza = px.pie(df_cat, values="valor", names="categoria", hole=0.4, color_discrete_sequence=px.colors.qualitative.Set3)
-            st.plotly_chart(fig_pizza, width="stretch")
+            st.subheader("📊 Situação das Contas do Mês")
+            df_status = df_mes.groupby("Alerta")["valor"].sum().reset_index()
+            fig_status = px.pie(
+                df_status, values="valor", names="Alerta", hole=0.4,
+                color="Alerta",
+                color_discrete_map={
+                    "🟢 Pago": "#2ecc71",
+                    "🔴 Atrasado": "#e74c3c",
+                    "🟡 A Pagar (No Prazo)": "#f1c40f"
+                }
+            )
+            st.plotly_chart(fig_status, width="stretch")
             
         with col_g2:
-            st.subheader("💳 Gastos por Método de Pagamento")
-            df_met = df.groupby("metodo_pagamento")["valor_pago"].sum().reset_index()
-            fig_barras = px.bar(df_met, x="metodo_pagamento", y="valor_pago", text_auto=".2f", color="metodo_pagamento")
+            st.subheader("🍕 Gastos por Categoria")
+            df_cat = df_mes.groupby("categoria")["valor"].sum().reset_index()
+            fig_pizza = px.pie(df_cat, values="valor", names="categoria", hole=0.4, color_discrete_sequence=px.colors.qualitative.Set3)
+            st.plotly_chart(fig_pizza, width="stretch")
+
+        st.divider()
+        col_g3, col_g4 = st.columns(2)
+        
+        with col_g3:
+            st.subheader("📈 Evolução de Gastos ao Longo do Ano")
+            if not df_ano.empty:
+                df_ano["Mes_Num"] = pd.to_datetime(df_ano["data"]).dt.month
+                df_evolucao = df_ano.groupby("Mes_Num")[["valor", "valor_pago"]].sum().reset_index()
+                df_evolucao["Mês"] = df_evolucao["Mes_Num"].apply(lambda x: datetime.date(2000, x, 1).strftime('%b'))
+                
+                fig_linha = px.line(
+                    df_evolucao, x="Mês", y=["valor", "valor_pago"],
+                    labels={"value": "R$", "variable": "Tipo"},
+                    markers=True,
+                    color_discrete_map={"valor": "#e74c3c", "valor_pago": "#2ecc71"}
+                )
+                st.plotly_chart(fig_linha, width="stretch")
+                
+        with col_g4:
+            st.subheader("💳 Formas de Pagamento Utilizadas")
+            df_met = df_mes.groupby("metodo_pagamento")["valor"].sum().reset_index()
+            fig_barras = px.bar(df_met, x="metodo_pagamento", y="valor", text_auto=".2f", color="metodo_pagamento")
             st.plotly_chart(fig_barras, width="stretch")
 
 # ==========================================
@@ -235,9 +287,12 @@ elif menu == "Novo Lançamento":
         
         if st.form_submit_button("Salvar Lançamento"):
             if descricao_input and categoria:
+                # REGRA INTELIGENTE: Se previu 0 mas pagou algo, iguala os valores
+                if valor == 0 and valor_pago > 0:
+                    valor = valor_pago
+                    
                 conn = get_connection()
                 cursor = conn.cursor()
-                # CORREÇÃO: Converte data para string no execute
                 cursor.execute("""
                     INSERT INTO lancamentos 
                     (user_id, data, descricao, valor, observacao, recorrente, status, categoria, metodo_pagamento, frequencia, valor_pago)
@@ -249,8 +304,9 @@ elif menu == "Novo Lançamento":
             else:
                 st.warning("Preencha ao menos Descrição e Categoria.")
 
+
 # ==========================================
-# TODAS AS CONTAS (EDITÁVEL)
+# TODAS AS CONTAS (EDITÁVEL COM CORES E EXCLUSÃO)
 # ==========================================
 elif menu == "Todas as Contas (Editável)":
     st.header("📋 Gestão Completa de Contas")
@@ -269,19 +325,50 @@ elif menu == "Todas as Contas (Editável)":
         
     query += " ORDER BY data ASC"
     
-    # CORREÇÃO: params convertidos para Tupla para ser compatível com libsql
     df = pd.read_sql_query(query, conn, params=tuple(params))
     conn.close()
     
     if df.empty:
         st.info("Nenhum registro encontrado para este filtro.")
     else:
+        hoje = datetime.date.today()
+        
         df["data"] = pd.to_datetime(df["data"]).dt.date
+        
+        # Cria a coluna de exclusão, padrão é False (Desmarcada)
+        df["Excluir"] = False
+        
+        def definir_situacao(row):
+            if row["status"] == "Pago":
+                return "🟢 Pago"
+            elif row["data"] < hoje:
+                return "🔴 Atrasado"
+            else:
+                return "🟡 A Pagar (No Prazo)"
+
+        df["Situação"] = df.apply(definir_situacao, axis=1)
+        
+        # Reorganiza as colunas incluindo a caixinha "Excluir"
+        df_exibicao = df[["id", "Excluir", "Situação", "data", "descricao", "valor", "valor_pago", "status", "categoria", "metodo_pagamento", "recorrente", "frequencia", "observacao"]]
+        
+        def colorir_tabela(val):
+            if val == "🟢 Pago":
+                return 'background-color: #d4edda; color: #155724; font-weight: bold'
+            elif val == "🔴 Atrasado":
+                return 'background-color: #f8d7da; color: #721c24; font-weight: bold'
+            elif val == "🟡 A Pagar (No Prazo)":
+                return 'background-color: #fff3cd; color: #856404; font-weight: bold'
+            return ''
+        
+        df_colorido = df_exibicao.style.map(colorir_tabela, subset=["Situação"])
+        
         df_editado = st.data_editor(
-            df,
+            df_colorido,
             column_config={
                 "id": st.column_config.NumberColumn("ID", disabled=True),
-                "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
+                "Excluir": st.column_config.CheckboxColumn("❌ Excluir", default=False),
+                "Situação": st.column_config.TextColumn("Situação", disabled=True),
+                "data": st.column_config.DateColumn("Vencimento", format="DD/MM/YYYY"),
                 "status": st.column_config.SelectboxColumn("Status", options=["Pendente", "Pago", "Agendado", "Cancelado"]),
                 "recorrente": st.column_config.SelectboxColumn("Recorrente?", options=["Sim", "Não"]),
                 "metodo_pagamento": st.column_config.SelectboxColumn("Método", options=["Pix", "Cartão de Crédito", "Boleto", "Dinheiro", "Transferência"]),
@@ -293,25 +380,42 @@ elif menu == "Todas as Contas (Editável)":
             key="editor_contas"
         )
         
-        if st.button("💾 Salvar Alterações na Tabela", type="primary"):
+        if st.button("💾 Salvar Alterações", type="primary"):
             conn = get_connection()
             cursor = conn.cursor()
+            
+            excluidos = 0
+            atualizados = 0
+            
             for _, row in df_editado.iterrows():
-                cursor.execute("""
-                    UPDATE lancamentos 
-                    SET data = ?, descricao = ?, valor = ?, valor_pago = ?, status = ?, categoria = ?, metodo_pagamento = ?, recorrente = ?, frequencia = ?, observacao = ?
-                    WHERE id = ? AND user_id = ?
-                """, (
-                    str(row["data"]), row["descricao"], row["valor"], row["valor_pago"], 
-                    row["status"], row["categoria"], row["metodo_pagamento"], 
-                    row["recorrente"], row["frequencia"], row["observacao"], 
-                    row["id"], user_id
-                ))
+                if row["Excluir"]:
+                    cursor.execute("DELETE FROM lancamentos WHERE id = ? AND user_id = ?", (row["id"], user_id))
+                    excluidos += 1
+                else:
+                    # Lemos os valores da linha
+                    valor_prev = row["valor"]
+                    valor_pg = row["valor_pago"]
+                    
+                    # REGRA INTELIGENTE: Se previu 0 (ou vazio) mas pagou algo, iguala os valores
+                    if (pd.isna(valor_prev) or valor_prev == 0) and valor_pg > 0:
+                        valor_prev = valor_pg
+                        
+                    cursor.execute("""
+                        UPDATE lancamentos 
+                        SET data = ?, descricao = ?, valor = ?, valor_pago = ?, status = ?, categoria = ?, metodo_pagamento = ?, recorrente = ?, frequencia = ?, observacao = ?
+                        WHERE id = ? AND user_id = ?
+                    """, (
+                        str(row["data"]), row["descricao"], valor_prev, valor_pg, 
+                        row["status"], row["categoria"], row["metodo_pagamento"], 
+                        row["recorrente"], row["frequencia"], row["observacao"], 
+                        row["id"], user_id
+                    ))
+                    atualizados += 1
+                    
             conn.commit()
             conn.close()
-            st.success("Alterações salvas!")
+            st.success(f"Pronto! {atualizados} contas atualizadas e {excluidos} contas excluídas.")
             st.rerun()
-
 # ==========================================
 # GERAR RECORRENTES FUTURAS
 # ==========================================
