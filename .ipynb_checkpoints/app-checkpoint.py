@@ -6,12 +6,21 @@ from dateutil.relativedelta import relativedelta
 import plotly.express as px
 
 # ==========================================
-# 1. CONFIGURAÇÃO E BANCO DE DADOS
+# 1. CONFIGURAÇÃO E CONEXÃO COM BANCO DE DADOS
 # ==========================================
 st.set_page_config(page_title="Controle Financeiro Inteligente", layout="wide", page_icon="📊")
 
 def get_connection():
-    return sqlite3.connect("financeiro.db", check_same_thread=False)
+    # Tenta conectar usando credenciais salvas no Streamlit Cloud (st.secrets)
+    # Se não houver secrets configurados, ele usa o SQLite local (financeiro.db)
+    if "TURSO_URL" in st.secrets and "TURSO_AUTH_TOKEN" in st.secrets:
+        import libsql_experimental as libsql
+        return libsql.connect(
+            database=st.secrets["TURSO_URL"],
+            auth_token=st.secrets["TURSO_AUTH_TOKEN"]
+        )
+    else:
+        return sqlite3.connect("financeiro.db", check_same_thread=False)
 
 def init_db():
     conn = get_connection()
@@ -82,7 +91,7 @@ def sugerir_categoria_e_metodo(descricao):
     return categoria_sugerida, metodo_sugerido
 
 # ==========================================
-# 3. AUTENTICAÇÃO
+# 3. AUTENTICAÇÃO E LOGIN
 # ==========================================
 if "user" not in st.session_state:
     st.session_state["user"] = None
@@ -94,8 +103,11 @@ def cadastrar_usuario(username, nome, senha):
         cursor.execute("INSERT INTO usuarios (username, nome, senha) VALUES (?, ?, ?)", (username, nome, senha))
         conn.commit()
         return True
-    except sqlite3.IntegrityError:
-        return False
+    except Exception as e:
+        # Captura erros de duplicidade tanto do SQLite local quanto do Turso (libsql)
+        if "UNIQUE constraint failed" in str(e) or "SQLITE_CONSTRAINT" in str(e):
+            return False
+        raise e
     finally:
         conn.close()
 
@@ -148,12 +160,12 @@ if st.sidebar.button("Sair"):
     st.rerun()
 
 st.sidebar.divider()
-menu = st.sidebar.radio("Navegação", ["Dashboard", "Todas as Contas", "Novo Lançamento", "Gerar Recorrentes Futuras"])
+menu = st.sidebar.radio("Navegação", ["Dashboard (Gráficos)", "Todas as Contas (Editável)", "Novo Lançamento", "Gerar Recorrentes Futuras"])
 
 # ==========================================
 # DASHBOARD COM GRÁFICOS
 # ==========================================
-if menu == "Dashboard":
+if menu == "Dashboard (Gráficos)":
     st.header("📈 Dashboard Financeiro")
     
     col_f1, col_f2 = st.columns(2)
@@ -170,7 +182,6 @@ if menu == "Dashboard":
     if df.empty:
         st.info("Nenhum lançamento encontrado para este período.")
     else:
-        # Métricas no topo
         tot_previsto = df["valor"].sum()
         tot_pago = df["valor_pago"].sum()
         pendente = tot_previsto - tot_pago
@@ -181,7 +192,6 @@ if menu == "Dashboard":
         m3.metric("Falta Pagar", f"R$ {pendente:,.2f}", delta_color="inverse")
         
         st.divider()
-        
         col_g1, col_g2 = st.columns(2)
         
         with col_g1:
@@ -197,7 +207,7 @@ if menu == "Dashboard":
             st.plotly_chart(fig_barras, use_container_width=True)
 
 # ==========================================
-# NOVO LANÇAMENTO (COM SUGESTÃO INTELIGENTE)
+# NOVO LANÇAMENTO (SUGESTÃO INTELIGENTE)
 # ==========================================
 elif menu == "Novo Lançamento":
     st.header("➕ Registrar Novo Lançamento")
@@ -240,7 +250,7 @@ elif menu == "Novo Lançamento":
 # ==========================================
 # TODAS AS CONTAS (EDITÁVEL)
 # ==========================================
-elif menu == "Todas as Contas":
+elif menu == "Todas as Contas (Editável)":
     st.header("📋 Gestão Completa de Contas")
     
     col_f1, col_f2 = st.columns(2)
