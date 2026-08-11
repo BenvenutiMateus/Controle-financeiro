@@ -6,21 +6,22 @@ from dateutil.relativedelta import relativedelta
 import plotly.express as px
 
 # ==========================================
-# 1. CONFIGURAÇÃO E CONEXÃO COM BANCO DE DADOS
+# 1. CONFIGURAÇÃO E BANCO DE DADOS
 # ==========================================
 st.set_page_config(page_title="Controle Financeiro Inteligente", layout="wide", page_icon="📊")
 
 def get_connection():
-    # Tenta conectar usando credenciais salvas no Streamlit Cloud (st.secrets)
-    # Se não houver secrets configurados, ele usa o SQLite local (financeiro.db)
     if "TURSO_URL" in st.secrets and "TURSO_AUTH_TOKEN" in st.secrets:
-        import libsql_experimental as libsql
-        return libsql.connect(
-            database=st.secrets["TURSO_URL"],
-            auth_token=st.secrets["TURSO_AUTH_TOKEN"]
-        )
-    else:
-        return sqlite3.connect("financeiro.db", check_same_thread=False)
+        try:
+            import libsql_experimental as libsql
+            return libsql.connect(
+                database=st.secrets["TURSO_URL"],
+                auth_token=st.secrets["TURSO_AUTH_TOKEN"]
+            )
+        except Exception as e:
+            st.warning(f"Erro ao conectar ao Turso: {e}")
+            
+    return sqlite3.connect("financeiro.db", check_same_thread=False)
 
 def init_db():
     conn = get_connection()
@@ -91,7 +92,7 @@ def sugerir_categoria_e_metodo(descricao):
     return categoria_sugerida, metodo_sugerido
 
 # ==========================================
-# 3. AUTENTICAÇÃO E LOGIN
+# 3. AUTENTICAÇÃO
 # ==========================================
 if "user" not in st.session_state:
     st.session_state["user"] = None
@@ -104,7 +105,6 @@ def cadastrar_usuario(username, nome, senha):
         conn.commit()
         return True
     except Exception as e:
-        # Captura erros de duplicidade tanto do SQLite local quanto do Turso (libsql)
         if "UNIQUE constraint failed" in str(e) or "SQLITE_CONSTRAINT" in str(e):
             return False
         raise e
@@ -173,6 +173,7 @@ if menu == "Dashboard (Gráficos)":
     filtro_ano = col_f2.number_input("Ano", min_value=2024, max_value=2030, value=datetime.date.today().year)
     
     conn = get_connection()
+    # CORREÇÃO: params como Tupla
     df = pd.read_sql_query("""
         SELECT * FROM lancamentos 
         WHERE user_id = ? AND strftime('%m', data) = ? AND strftime('%Y', data) = ?
@@ -198,16 +199,16 @@ if menu == "Dashboard (Gráficos)":
             st.subheader("🍕 Distribuição por Categoria")
             df_cat = df.groupby("categoria")["valor"].sum().reset_index()
             fig_pizza = px.pie(df_cat, values="valor", names="categoria", hole=0.4, color_discrete_sequence=px.colors.qualitative.Set3)
-            st.plotly_chart(fig_pizza, use_container_width=True)
+            st.plotly_chart(fig_pizza, width="stretch")
             
         with col_g2:
             st.subheader("💳 Gastos por Método de Pagamento")
             df_met = df.groupby("metodo_pagamento")["valor_pago"].sum().reset_index()
             fig_barras = px.bar(df_met, x="metodo_pagamento", y="valor_pago", text_auto=".2f", color="metodo_pagamento")
-            st.plotly_chart(fig_barras, use_container_width=True)
+            st.plotly_chart(fig_barras, width="stretch")
 
 # ==========================================
-# NOVO LANÇAMENTO (SUGESTÃO INTELIGENTE)
+# NOVO LANÇAMENTO
 # ==========================================
 elif menu == "Novo Lançamento":
     st.header("➕ Registrar Novo Lançamento")
@@ -236,11 +237,12 @@ elif menu == "Novo Lançamento":
             if descricao_input and categoria:
                 conn = get_connection()
                 cursor = conn.cursor()
+                # CORREÇÃO: Converte data para string no execute
                 cursor.execute("""
                     INSERT INTO lancamentos 
                     (user_id, data, descricao, valor, observacao, recorrente, status, categoria, metodo_pagamento, frequencia, valor_pago)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (user_id, data, descricao_input, valor, observacao, recorrente, status, categoria, metodo_pagamento, frequencia, valor_pago))
+                """, (user_id, str(data), descricao_input, valor, observacao, recorrente, status, categoria, metodo_pagamento, frequencia, valor_pago))
                 conn.commit()
                 conn.close()
                 st.success("Lançamento salvo com sucesso!")
@@ -267,7 +269,8 @@ elif menu == "Todas as Contas (Editável)":
         
     query += " ORDER BY data ASC"
     
-    df = pd.read_sql_query(query, conn, params=params)
+    # CORREÇÃO: params convertidos para Tupla para ser compatível com libsql
+    df = pd.read_sql_query(query, conn, params=tuple(params))
     conn.close()
     
     if df.empty:
@@ -286,7 +289,7 @@ elif menu == "Todas as Contas (Editável)":
                 "valor_pago": st.column_config.NumberColumn("Valor Pago (R$)", format="R$ %.2f"),
             },
             hide_index=True,
-            use_container_width=True,
+            width="stretch",
             key="editor_contas"
         )
         
@@ -336,7 +339,7 @@ elif menu == "Gerar Recorrentes Futuras":
                             INSERT INTO lancamentos 
                             (user_id, data, descricao, valor, observacao, recorrente, status, categoria, metodo_pagamento, frequencia, valor_pago)
                             VALUES (?, ?, ?, ?, ?, 'Sim', 'Pendente', ?, ?, ?, 0.0)
-                        """, (user_id, data_futura, c[0], c[1], c[5], c[2], c[3], c[4]))
+                        """, (user_id, str(data_futura), c[0], c[1], c[5], c[2], c[3], c[4]))
                         novos += 1
             conn.commit()
             conn.close()
