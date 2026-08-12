@@ -6,9 +6,11 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "bcrypt>=5.0.0",
+    "google-generativeai>=0.8.6",
     "jupyter>=1.1.1",
     "libsql-experimental>=0.0.55",
     "pandas>=3.0.5",
     "plotly>=6.9.0",
+    "scikit-learn>=1.9.0",
     "streamlit>=1.61.1",
 ]
