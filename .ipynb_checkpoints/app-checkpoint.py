@@ -8,6 +8,8 @@ import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 import libsql_experimental as libsql
 
+
+
 # ==========================================
 # 1. ARQUITETURA DE BANCOS DE DADOS
 # ==========================================
@@ -166,7 +168,7 @@ if menu == "Dashboard Analytics":
     st.header("📈 Dashboard Analytics Preditivo")
     
     c1, c2 = st.columns(2)
-    filtro_mes = c1.selectbox("Mês", list(range(1, 13)), index=datetime.date.today().month - 1)
+    filtro_mes = c1.selectbox("Mês", list(range(1, 13)) + ['Todos'], index=datetime.date.today().month - 1)
     filtro_ano = c2.number_input("Ano", min_value=2024, max_value=2030, value=datetime.date.today().year)
     
     conn = get_personal_connection()
@@ -177,15 +179,23 @@ if menu == "Dashboard Analytics":
         st.info("Nenhum dado encontrado para gerar análises.")
     else:
         df_completo["dt_data"] = pd.to_datetime(df_completo["data"])
+    
+        if filtro_mes != "Todos":
+            df_filtrado = df_completo[
+                (df_completo["dt_data"].dt.month == filtro_mes) &
+                (df_completo["dt_data"].dt.year == filtro_ano)
+            ]
+            mes_anterior = filtro_mes - 1 if filtro_mes > 1 else 12
+            ano_anterior = filtro_ano if filtro_mes > 1 else filtro_ano - 1
+            df_anterior = df_completo[(df_completo["dt_data"].dt.month == mes_anterior) & (df_completo["dt_data"].dt.year == ano_anterior)]
+        else:
+            df_filtrado = df_completo[
+                df_completo["dt_data"].dt.year == filtro_ano
+            ]
+            df_anterior = df_completo["dt_data"].dt.year == filtro_ano - 1
         
-        df_mes = df_completo[(df_completo["dt_data"].dt.month == filtro_mes) & (df_completo["dt_data"].dt.year == filtro_ano)]
-        
-        mes_anterior = filtro_mes - 1 if filtro_mes > 1 else 12
-        ano_anterior = filtro_ano if filtro_mes > 1 else filtro_ano - 1
-        df_mes_ant = df_completo[(df_completo["dt_data"].dt.month == mes_anterior) & (df_completo["dt_data"].dt.year == ano_anterior)]
-        
-        tot_atual = df_mes["valor"].sum()
-        tot_anterior = df_mes_ant["valor"].sum()
+        tot_atual = df_filtrado["valor"].sum() if df_filtrado is not None else 0
+        tot_anterior = df_anterior["valor"].sum() if df_anterior is not None else 0
         delta_perc = ((tot_atual - tot_anterior) / tot_anterior * 100) if tot_anterior > 0 else 0
         
         previsao_rf = 0
@@ -204,8 +214,8 @@ if menu == "Dashboard Analytics":
         st.subheader("Visão Geral do Mês")
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Gasto Total", f"R$ {tot_atual:,.2f}", f"{delta_perc:.1f}% vs Mês Anterior", delta_color="inverse")
-        m2.metric("Total Pago", f"R$ {df_mes['valor_pago'].sum():,.2f}")
-        m3.metric("Pendente", f"R$ {(tot_atual - df_mes['valor_pago'].sum()):,.2f}")
+        m2.metric("Total Pago", f"R$ {df_filtrado['valor_pago'].sum():,.2f}")
+        m3.metric("Pendente", f"R$ {(tot_atual - df_filtrado['valor_pago'].sum()):,.2f}")
         
         if previsao_rf > 0:
             m4.metric("Previsão Estatística (ML)", f"R$ {previsao_rf:,.2f}", "Modelo Random Forest", delta_color="off")
@@ -218,7 +228,7 @@ if menu == "Dashboard Analytics":
         df_hist_cat = df_completo.groupby(["categoria", df_completo["dt_data"].dt.to_period("M")])["valor"].sum().reset_index()
         estatisticas = df_hist_cat.groupby("categoria")["valor"].agg(['mean', 'std']).fillna(0)
         
-        gasto_cat_atual = df_mes.groupby("categoria")["valor"].sum()
+        gasto_cat_atual = df_filtrado.groupby("categoria")["valor"].sum()
         for cat, valor in gasto_cat_atual.items():
             if cat in estatisticas.index:
                 media = estatisticas.loc[cat, 'mean']
@@ -238,19 +248,19 @@ if menu == "Dashboard Analytics":
         c_graf1, c_graf2 = st.columns(2)
         with c_graf1:
             st.subheader("Distribuição por Método de pagamento")
-            df_pagamento = df_mes.groupby("metodo_pagamento")["valor"].sum().reset_index()
+            df_pagamento = df_filtrado.groupby("metodo_pagamento")["valor"].sum().reset_index()
             fig_pagamento = px.pie(df_pagamento, values = "valor", names = 'metodo_pagamento', hole = 0.3)
             st.plotly_chart(fig_pagamento, width='stretch')
             
         with c_graf2:
             st.subheader("Distribuição por Categoria")
-            df_pizza = df_mes.groupby("categoria")["valor"].sum().reset_index()
+            df_pizza = df_filtrado.groupby("categoria")["valor"].sum().reset_index()
             fig_pizza = px.pie(df_pizza, values="valor", names="categoria", hole=0.4)
             st.plotly_chart(fig_pizza, width="stretch")
             
         st.divider()
         st.subheader("Top 5 Maiores Despesas")
-        df_top5 = df_mes.sort_values(by="valor", ascending=False).head(5)[["descricao", "categoria", "valor"]]
+        df_top5 = df_filtrado.sort_values(by="valor", ascending=False).head(5)[["descricao", "categoria", "valor"]]
         st.dataframe(df_top5, use_container_width=True, hide_index=True)
         
         

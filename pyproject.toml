@@ -1,7 +1,7 @@
 [project]
 name = "controle-financeiro"
 version = "0.1.0"
-description = "Add your description here"
+description = "Application for financial control"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [

@@ -8,141 +8,90 @@ import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 import libsql_experimental as libsql
 
+
+
 # ==========================================
 # 1. ARQUITETURA DE BANCOS DE DADOS
 # ==========================================
 st.set_page_config(page_title="Controle Financeiro Pessoal", layout="wide", page_icon="💰")
 
-# --- BANCO MASTER (Apenas para guardar os Logins e Chaves Turso) ---
-def get_master_connection():
-    return libsql.connect(
-        database= st.secrets["TURSO_URL"],
-        auth_token= st.secrets["TURSO_AUTH_TOKEN"]
-    )
-
-def init_master_db():
-    conn = get_master_connection()
-    cursor = conn.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS usuarios (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            nome TEXT NOT NULL,
-            senha TEXT NOT NULL,
-            turso_url TEXT NOT NULL,
-            turso_token TEXT NOT NULL
-        )
-    """)
-    conn.commit()
-    conn.close()
-
-init_master_db()
-
 # --- BANCO PESSOAL (Conecta direto no Turso do Usuário Logado) ---
 def get_personal_connection():
-    
     return libsql.connect(
         database=st.session_state["user"]["turso_url"],
         auth_token=st.session_state["user"]["turso_token"]
     )
 
 # ==========================================
-# 2. SISTEMA DE LOGIN E CADASTRO TURSO
+# 2. SISTEMA DE LOGIN COM SECRETS
 # ==========================================
 if "user" not in st.session_state:
     st.session_state["user"] = None
 
-def cadastrar_usuario(username, nome, senha, url, token):
-    conn = get_master_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute("INSERT INTO usuarios (username, nome, senha, turso_url, turso_token) VALUES (?, ?, ?, ?, ?)", 
-                       (username, nome, senha, url, token))
-        conn.commit()
-        return True
-    except Exception as e:
-        if "UNIQUE constraint failed" in str(e) or "SQLITE_CONSTRAINT" in str(e):
-            return False
-        raise e
-    finally:
-        conn.close()
-
 def autenticar_usuario(username, senha):
-    conn = get_master_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, username, nome, turso_url, turso_token FROM usuarios WHERE username = ? AND senha = ?", (username, senha))
-    row = cursor.fetchone()
-    conn.close()
-    
-    if row:
-        user_data = {"id": row[0], "username": row[1], "nome": row[2], "turso_url": row[3], "turso_token": row[4]}
-        
-        try:
-            import libsql_experimental as libsql
-            conn_p = libsql.connect(database=user_data["turso_url"], auth_token=user_data["turso_token"])
-            cursor_p = conn_p.cursor()
-            # Removido o Centro de Custo, agora é 100% pessoal
-            cursor_p.execute("""
-                CREATE TABLE IF NOT EXISTS lancamentos (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    data DATE NOT NULL,
-                    descricao TEXT NOT NULL,
-                    valor REAL NOT NULL,
-                    observacao TEXT,
-                    recorrente TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    categoria TEXT NOT NULL,
-                    metodo_pagamento TEXT NOT NULL,
-                    frequencia TEXT,
-                    valor_pago REAL
-                )
-            """)
-            conn_p.commit()
-            conn_p.close()
-            return user_data
-        except Exception as e:
-            st.error(f"Erro ao conectar ao seu banco Turso. Verifique suas chaves! Detalhes: {e}")
-            return None
-    return None
+    usuarios = st.secrets.get("usuarios", {})
+    perfil = usuarios.get(username)
+
+    if not perfil:
+        return None
+
+    if perfil.get("senha") != senha:
+        return None
+
+    user_data = {
+        "id": username,
+        "username": username,
+        "nome": perfil.get("nome", username),
+        "turso_url": perfil.get("turso_url"),
+        "turso_token": perfil.get("turso_token"),
+    }
+
+    try:
+        conn_p = libsql.connect(database=user_data["turso_url"], auth_token=user_data["turso_token"])
+        cursor_p = conn_p.cursor()
+        cursor_p.execute("""
+            CREATE TABLE IF NOT EXISTS lancamentos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                data DATE NOT NULL,
+                descricao TEXT NOT NULL,
+                valor REAL NOT NULL,
+                observacao TEXT,
+                recorrente TEXT NOT NULL,
+                status TEXT NOT NULL,
+                categoria TEXT NOT NULL,
+                metodo_pagamento TEXT NOT NULL,
+                frequencia TEXT,
+                valor_pago REAL
+            )
+        """)
+        conn_p.commit()
+        conn_p.close()
+        return user_data
+    except Exception as e:
+        st.error(f"Erro ao conectar ao seu banco Turso. Verifique suas chaves! Detalhes: {e}")
+        return None
 
 if st.session_state["user"] is None:
     st.title("💰 Controle Financeiro Pessoal")
-    
-    # Abas mais claras para você achar o Turso facilmente!
-    aba_login, aba_cadastro = st.tabs(["🔐 Já tenho conta (Entrar)", "🆕 Criar Conta e Conectar Turso"])
-    
-    with aba_login:
-        with st.form("form_login"):
-            usuario = st.text_input("Usuário / E-mail", autocomplete="username")
-            senha = st.text_input("Senha", type="password", autocomplete="current-password")
-            if st.form_submit_button("Entrar"):
-                user = autenticar_usuario(usuario, senha)
-                if user:
-                    st.session_state["user"] = user
-                    st.rerun()
-                else:
-                    st.error("Usuário ou senha incorretos.")
-                    
-    with aba_cadastro:
-        st.info("Para garantir sua privacidade, seus dados ficam no seu próprio banco. Preencha as chaves abaixo para criar sua conta.")
-        with st.form("form_cadastro"):
-            novo_usuario = st.text_input("Usuário / E-mail", autocomplete="new-username")
-            novo_nome = st.text_input("Seu Nome")
-            nova_senha = st.text_input("Senha", type="password", autocomplete="new-password")
-            
-            st.divider()
-            st.subheader("🔗 Credenciais do Turso")
-            nova_url = st.text_input("URL do Banco (Ex: libsql://seu-banco.turso.io)")
-            novo_token = st.text_input("Token de Autenticação", type="password")
-            
-            if st.form_submit_button("Cadastrar e Conectar Banco"):
-                if nova_url and novo_token:
-                    if cadastrar_usuario(novo_usuario, novo_nome, nova_senha, nova_url, novo_token):
-                        st.success("Conta criada! Volte na aba 'Já tenho conta' para fazer o login.")
-                    else:
-                        st.error("Este usuário já está cadastrado.")
-                else:
-                    st.warning("A URL e o Token do Turso são obrigatórios.")
+
+    usuarios_disponiveis = sorted(st.secrets.get("usuarios", {}).keys())
+
+    if not usuarios_disponiveis:
+        st.warning("Nenhum usuário configurado em secrets. Adicione usuários em [usuarios.<nome>] no arquivo .streamlit/secrets.toml")
+        st.stop()
+
+    with st.form("form_login"):
+        usuario = st.selectbox("Usuário", usuarios_disponiveis)
+        senha = st.text_input("Senha", type="password", autocomplete="current-password")
+
+        if st.form_submit_button("Entrar"):
+            user = autenticar_usuario(usuario, senha)
+            if user:
+                st.session_state["user"] = user
+                st.rerun()
+            else:
+                st.error("Usuário ou senha incorretos.")
+
     st.stop()
 
 # ==========================================
@@ -166,7 +115,7 @@ if menu == "Dashboard Analytics":
     st.header("📈 Dashboard Analytics Preditivo")
     
     c1, c2 = st.columns(2)
-    filtro_mes = c1.selectbox("Mês", list(range(1, 13)), index=datetime.date.today().month - 1)
+    filtro_mes = c1.selectbox("Mês", list(range(1, 13)) + ['Todos'], index=datetime.date.today().month - 1)
     filtro_ano = c2.number_input("Ano", min_value=2024, max_value=2030, value=datetime.date.today().year)
     
     conn = get_personal_connection()
@@ -177,35 +126,45 @@ if menu == "Dashboard Analytics":
         st.info("Nenhum dado encontrado para gerar análises.")
     else:
         df_completo["dt_data"] = pd.to_datetime(df_completo["data"])
+    
+        if filtro_mes != "Todos":
+            df_filtrado = df_completo[
+                (df_completo["dt_data"].dt.month == filtro_mes) &
+                (df_completo["dt_data"].dt.year == filtro_ano)
+            ]
+            mes_anterior = filtro_mes - 1 if filtro_mes > 1 else 12
+            ano_anterior = filtro_ano if filtro_mes > 1 else filtro_ano - 1
+            df_anterior = df_completo[(df_completo["dt_data"].dt.month == mes_anterior) & (df_completo["dt_data"].dt.year == ano_anterior)]
+        else:
+            df_filtrado = df_completo[
+                df_completo["dt_data"].dt.year == filtro_ano
+            ]
+            df_anterior = df_completo[df_completo["dt_data"].dt.year == (filtro_ano - 1)]
         
-        df_mes = df_completo[(df_completo["dt_data"].dt.month == filtro_mes) & (df_completo["dt_data"].dt.year == filtro_ano)]
-        
-        mes_anterior = filtro_mes - 1 if filtro_mes > 1 else 12
-        ano_anterior = filtro_ano if filtro_mes > 1 else filtro_ano - 1
-        df_mes_ant = df_completo[(df_completo["dt_data"].dt.month == mes_anterior) & (df_completo["dt_data"].dt.year == ano_anterior)]
-        
-        tot_atual = df_mes["valor"].sum()
-        tot_anterior = df_mes_ant["valor"].sum()
+        tot_atual = df_filtrado["valor"].sum() if df_filtrado is not None else 0
+        tot_anterior = df_anterior["valor"].sum() if df_anterior is not None else 0
         delta_perc = ((tot_atual - tot_anterior) / tot_anterior * 100) if tot_anterior > 0 else 0
         
         previsao_rf = 0
-        df_historico = df_completo[df_completo["dt_data"] < datetime.datetime(filtro_ano, filtro_mes, 1) if filtro_mes > 1 else datetime.datetime(filtro_ano, 1, 1)]
-        if len(df_historico) > 10:
-            df_historico["mes"] = df_historico["dt_data"].dt.month
-            df_historico["ano"] = df_historico["dt_data"].dt.year
-            df_rf = df_historico.groupby(["ano", "mes"])["valor"].sum().reset_index()
-            if len(df_rf) > 3:
-                X = df_rf[["ano", "mes"]]
-                y = df_rf["valor"]
-                modelo_rf = RandomForestRegressor(n_estimators=50, random_state=42)
-                modelo_rf.fit(X, y)
-                previsao_rf = modelo_rf.predict([[filtro_ano, filtro_mes]])[0]
+        if filtro_mes != "Todos":
+            mes_inicio = filtro_mes if filtro_mes > 1 else 1
+            df_historico = df_completo[df_completo["dt_data"] < datetime.datetime(filtro_ano, mes_inicio, 1)]
+            if len(df_historico) > 10:
+                df_historico["mes"] = df_historico["dt_data"].dt.month
+                df_historico["ano"] = df_historico["dt_data"].dt.year
+                df_rf = df_historico.groupby(["ano", "mes"])["valor"].sum().reset_index()
+                if len(df_rf) > 3:
+                    X = df_rf[["ano", "mes"]]
+                    y = df_rf["valor"]
+                    modelo_rf = RandomForestRegressor(n_estimators=50, random_state=42)
+                    modelo_rf.fit(X, y)
+                    previsao_rf = modelo_rf.predict([[filtro_ano, filtro_mes]])[0]
         
         st.subheader("Visão Geral do Mês")
         m1, m2, m3, m4 = st.columns(4)
         m1.metric("Gasto Total", f"R$ {tot_atual:,.2f}", f"{delta_perc:.1f}% vs Mês Anterior", delta_color="inverse")
-        m2.metric("Total Pago", f"R$ {df_mes['valor_pago'].sum():,.2f}")
-        m3.metric("Pendente", f"R$ {(tot_atual - df_mes['valor_pago'].sum()):,.2f}")
+        m2.metric("Total Pago", f"R$ {df_filtrado['valor_pago'].sum():,.2f}")
+        m3.metric("Pendente", f"R$ {(tot_atual - df_filtrado['valor_pago'].sum()):,.2f}")
         
         if previsao_rf > 0:
             m4.metric("Previsão Estatística (ML)", f"R$ {previsao_rf:,.2f}", "Modelo Random Forest", delta_color="off")
@@ -218,7 +177,7 @@ if menu == "Dashboard Analytics":
         df_hist_cat = df_completo.groupby(["categoria", df_completo["dt_data"].dt.to_period("M")])["valor"].sum().reset_index()
         estatisticas = df_hist_cat.groupby("categoria")["valor"].agg(['mean', 'std']).fillna(0)
         
-        gasto_cat_atual = df_mes.groupby("categoria")["valor"].sum()
+        gasto_cat_atual = df_filtrado.groupby("categoria")["valor"].sum()
         for cat, valor in gasto_cat_atual.items():
             if cat in estatisticas.index:
                 media = estatisticas.loc[cat, 'mean']
@@ -238,19 +197,19 @@ if menu == "Dashboard Analytics":
         c_graf1, c_graf2 = st.columns(2)
         with c_graf1:
             st.subheader("Distribuição por Método de pagamento")
-            df_pagamento = df_mes.groupby("metodo_pagamento")["valor"].sum().reset_index()
+            df_pagamento = df_filtrado.groupby("metodo_pagamento")["valor"].sum().reset_index()
             fig_pagamento = px.pie(df_pagamento, values = "valor", names = 'metodo_pagamento', hole = 0.3)
             st.plotly_chart(fig_pagamento, width='stretch')
             
         with c_graf2:
             st.subheader("Distribuição por Categoria")
-            df_pizza = df_mes.groupby("categoria")["valor"].sum().reset_index()
+            df_pizza = df_filtrado.groupby("categoria")["valor"].sum().reset_index()
             fig_pizza = px.pie(df_pizza, values="valor", names="categoria", hole=0.4)
             st.plotly_chart(fig_pizza, width="stretch")
             
         st.divider()
         st.subheader("Top 5 Maiores Despesas")
-        df_top5 = df_mes.sort_values(by="valor", ascending=False).head(5)[["descricao", "categoria", "valor"]]
+        df_top5 = df_filtrado.sort_values(by="valor", ascending=False).head(5)[["descricao", "categoria", "valor"]]
         st.dataframe(df_top5, use_container_width=True, hide_index=True)
         
         
