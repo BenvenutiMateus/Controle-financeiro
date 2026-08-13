@@ -157,7 +157,7 @@ if st.sidebar.button("Sair"):
     st.rerun()
 
 st.sidebar.divider()
-menu = st.sidebar.radio("Navegação", ["Dashboard Analytics", "Todas as Contas", "Novo Lançamento", "Gerar Recorrentes"])
+menu = st.sidebar.radio("Navegação", ["Dashboard Analytics", "Contas por mês", "Novo Lançamento", "Gerar Recorrentes"])
 
 # ==========================================
 # DASHBOARD ANALYTICS 
@@ -237,9 +237,10 @@ if menu == "Dashboard Analytics":
 
         c_graf1, c_graf2 = st.columns(2)
         with c_graf1:
-            st.subheader("Top 5 Maiores Despesas")
-            df_top5 = df_mes.sort_values(by="valor", ascending=False).head(5)[["descricao", "categoria", "valor"]]
-            st.dataframe(df_top5, use_container_width=True, hide_index=True)
+            st.subheader("Distribuição por Método de pagamento")
+            df_pagamento = df_mes.groupby("metodo_pagamento")["valor"].sum().reset_index()
+            fig_pagamento = px.pie(df_pagamento, values = "valor", names = 'metodo_pagamento', hole = 0.3)
+            st.plotly_chart(fig_pagamento, width='stretch')
             
         with c_graf2:
             st.subheader("Distribuição por Categoria")
@@ -248,6 +249,11 @@ if menu == "Dashboard Analytics":
             st.plotly_chart(fig_pizza, width="stretch")
             
         st.divider()
+        st.subheader("Top 5 Maiores Despesas")
+        df_top5 = df_mes.sort_values(by="valor", ascending=False).head(5)[["descricao", "categoria", "valor"]]
+        st.dataframe(df_top5, use_container_width=True, hide_index=True)
+        
+        
         st.subheader("Linha do Tempo últimos 12 Meses (Por Categoria)")
         um_ano_atras = datetime.date.today() - relativedelta(months=11)
         um_ano_atras = um_ano_atras.replace(day=1)
@@ -305,6 +311,7 @@ elif menu == "Novo Lançamento":
                 conn.commit()
                 conn.close()
                 st.success(f"Lançamento de R$ {dados_ia['valor']} inserido com sucesso!")
+                st.success(dados_ia)
         except Exception as e:
             st.error(f"Erro na IA. Tente preencher manualmente. Detalhes: {e}")
 
@@ -347,9 +354,9 @@ elif menu == "Novo Lançamento":
                 st.warning("Preencha Descrição e Categoria.")
 
 # ==========================================
-# TODAS AS CONTAS (Tabela Interativa)
+# Contas por mês (Tabela Interativa)
 # ==========================================
-elif menu == "Todas as Contas":
+elif menu == "Contas por mês":
     st.header("📋 Gestão de Contas")
     
     f1, f2 = st.columns(2)
@@ -459,12 +466,26 @@ elif menu == "Gerar Recorrentes":
             for m in range(1, qtd_meses + 1):
                 data_futura = hoje + relativedelta(months=m)
                 for c in contas:
-                    cursor.execute("SELECT id FROM lancamentos WHERE descricao = ? AND strftime('%m', data) = ? AND strftime('%Y', data) = ?", (c[0], f"{data_futura.month:02d}", str(data_futura.year)))
+                    cursor.execute(
+                        "SELECT id FROM lancamentos WHERE descricao = ? AND strftime('%m', data) = ? AND strftime('%Y', data) = ?",
+                        (c[0], f"{data_futura.month:02d}", str(data_futura.year))
+                    )
+                
                     if not cursor.fetchone():
                         cursor.execute("""
-                            INSERT INTO lancamentos (data, descricao, valor, observacao, recorrente, status, categoria, metodo_pagamento, frequencia, valor_pago)
+                            INSERT INTO lancamentos 
+                            (data, descricao, valor, observacao, recorrente, status, categoria, metodo_pagamento, frequencia, valor_pago)
                             VALUES (?, ?, ?, ?, 'Sim', 'Pendente', ?, ?, ?, 0.0)
-                        """, (str(data_futura), c[0], c[1], c[5], c[3], c[4]))
+                        """, (
+                            str(data_futura),
+                            c[0],
+                            c[1],
+                            c[5],
+                            c[2],
+                            c[3],
+                            c[4]
+                        ))
+
                         novos += 1
             conn.commit()
             conn.close()
