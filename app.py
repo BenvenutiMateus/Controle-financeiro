@@ -260,9 +260,31 @@ if menu == "Dashboard Analytics":
         df_12m = df_completo[df_completo["dt_data"].dt.date >= um_ano_atras].copy()
         
         if not df_12m.empty:
-            df_12m["Mes_Ano"] = df_12m["dt_data"].dt.strftime('%Y %m')
-            df_linha = df_12m.groupby(["Mes_Ano", "categoria"])["valor"].sum().reset_index()
-            fig_linha = px.bar(df_linha, x="Mes_Ano", y="valor", color="categoria", barmode="stack")
+            df_12m["Mes_Ano"] = df_12m["dt_data"].dt.strftime('%m/%Y')
+
+            df_linha = (
+                df_12m
+                .groupby(["Mes_Ano", "categoria"])["valor"]
+                .sum()
+                .reset_index()
+            )
+            
+            ordem_meses = (
+                df_12m[["Mes_Ano", "dt_data"]]
+                .drop_duplicates()
+                .sort_values("dt_data")["Mes_Ano"]
+                .tolist()
+            )
+            
+            fig_linha = px.bar(
+                df_linha,
+                x="Mes_Ano",
+                y="valor",
+                color="categoria",
+                barmode="stack",
+                category_orders={"Mes_Ano": ordem_meses}
+            )
+            
             st.plotly_chart(fig_linha, width="stretch")
 
 # ==========================================
@@ -289,7 +311,10 @@ elif menu == "Novo Lançamento":
             - "valor": Valor em numero (float)
             - "categoria": Sugira uma categoria logica (string)
             - "metodo_pagamento": 'Pix', 'Cartão de Crédito', 'Boleto', 'Dinheiro' ou 'Transferência' (string)
+            - "data" : no Formato "%Y-%m-%d" usando como referência o dia de hoje ({datetime.date.today()})) (string)
             - "status": 'Pago' ou 'Pendente' (string)
+            - "recorrente" : 'Sim' ou 'Não' (string)
+            - "frequencia" :  "Mensal", "Único", "Anual", "Semanal" (string)
             """
             
             with st.spinner("A IA está analisando..."):
@@ -302,11 +327,11 @@ elif menu == "Novo Lançamento":
                 cursor.execute("""
                     INSERT INTO lancamentos 
                     (data, descricao, valor, observacao, recorrente, status, categoria, metodo_pagamento, frequencia, valor_pago)
-                    VALUES (?, ?, ?, ?, 'Não', ?, ?, ?, 'Único', ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
-                    str(datetime.date.today()), dados_ia["descricao"], dados_ia["valor"], 
-                    "Gerado via IA: " + texto_ia, dados_ia["status"], dados_ia["categoria"], 
-                    dados_ia["metodo_pagamento"], dados_ia["valor"] if dados_ia["status"] == "Pago" else 0.0
+                    str(dados_ia['data']), dados_ia["descricao"], dados_ia["valor"], 
+                    "Gerado via IA: " + texto_ia,dados_ia['recorrente'], dados_ia["status"], dados_ia["categoria"], 
+                    dados_ia["metodo_pagamento"], dados_ia['frequencia'],dados_ia["valor"] if dados_ia["status"] == "Pago" else 0.0
                 ))
                 conn.commit()
                 conn.close()
