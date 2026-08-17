@@ -149,7 +149,7 @@ if st.sidebar.button("Sair"):
 st.sidebar.divider()
 menu_principal = st.sidebar.selectbox(
     "Módulo",
-    ["Visão Geral", "Finanças", "Tarefas", "Agenda", "Estudos", "Projetos", "Dashboard"]
+    ["Dashboard", "Finanças", "Tarefas", "Agenda", "Estudos", "Projetos"]
 )
 
 st.sidebar.divider()
@@ -741,7 +741,7 @@ elif menu_principal == "Projetos":
 # ==========================================
 # MÓDULO: VISÃO GERAL / DASHBOARD
 # ==========================================
-elif menu_principal in ["Visão Geral", "Dashboard"]:
+elif menu_principal == "Dashboard":
     st.header(f"📊 {menu_principal}")
 
     conn = get_personal_connection()
