@@ -21,7 +21,7 @@ def gerar_resposta_ia(prompt, modelo_nome='gemini-3.6-flash'):
 # ==========================================
 # 1. ARQUITETURA DE BANCOS DE DADOS
 # ==========================================
-st.set_page_config(page_title="Controle Financeiro Pessoal", layout="wide", page_icon="💰")
+st.set_page_config(page_title="Controle Pessoal", layout="wide", page_icon="💰")
 
 # --- BANCO PESSOAL (Conecta direto no Turso do Usuário Logado) ---
 def get_personal_connection():
@@ -695,7 +695,7 @@ elif menu_principal == "Estudos":
 # ==========================================
 elif menu_principal == "Projetos":
     st.header("💼 Projetos")
-    menu_projetos = st.sidebar.radio("Projetos", ["Projetos pessoais", "PET", "IC", "Programação", "Novo Projeto"])
+    menu_projetos = st.sidebar.radio("Projetos", ["Projetos pessoais", "Faculdade", "Lançar Projeto"])
 
     if menu_projetos == "Novo Projeto":
         st.subheader("🤖 Inserir Projeto com IA")
