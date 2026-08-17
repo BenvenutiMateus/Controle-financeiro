@@ -72,7 +72,7 @@ def autenticar_usuario(username, senha):
                 valor_pago REAL
             )
         ''')
-        cursor_p.exececute('''
+        cursor_p.execute('''
             CREATE TABLE IF NOT EXISTS receitas (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 data DATE NOT NULL,
@@ -504,7 +504,9 @@ elif menu == "Lançamentos":
         try:
             prompt = f"""
             Analise a frase: "{texto_ia}"
+            Identifique se é uma despesa ou receita. Se for uma despesa:
             Retorne um JSON com estas chaves (focado em finanças pessoais):
+            - "tipo": 'Receita' (string)
             - "descricao": O local ou motivo (string)
             - "valor": Valor em numero (float)
             - "categoria": Sugira uma categoria logica (string)
@@ -513,6 +515,10 @@ elif menu == "Lançamentos":
             - "status": 'Pago' ou 'Pendente' (string)
             - "recorrente" : 'Sim' ou 'Não' (string)
             - "frequencia" :  "Mensal", "Único", "Anual", "Semanal" (string)
+
+            Se for receita:
+            Retorne um JSON com estas chaves (focado em finanças pessoais):
+            - "tipo": 'Despesa' (string)
             """
             
             with st.spinner("A IA está analisando..."):
