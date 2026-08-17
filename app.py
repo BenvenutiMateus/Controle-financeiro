@@ -72,6 +72,17 @@ def autenticar_usuario(username, senha):
                 valor_pago REAL
             )
         ''')
+        cursor_p.exececute('''
+            CREATE TABLE IF NOT EXISTS receitas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                data DATE NOT NULL,
+                descricao TEXT NOT NULL,
+                valor REAL NOT NULL,
+                observacao TEXT,
+                recorrente TEXT NOT NULL,
+                frequencia TEXT
+        )
+        ''')
         cursor_p.execute('''
             CREATE TABLE IF NOT EXISTS tarefas (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -154,7 +165,7 @@ menu_principal = st.sidebar.selectbox(
 
 st.sidebar.divider()
 if menu_principal == "Finanças":
-    menu = st.sidebar.radio("Sub-menu", ["Lançamentos", "Receitas", "Despesas", "Orçamento", "Análises", "Contas por mês", "Gerar Recorrentes"])
+    menu = st.sidebar.radio("Sub-menu", ["Lançamentos", "Receitas", "Despesas", "Orçamento", "Análises", "Gerar Recorrentes"])
 else:
     menu = menu_principal
 
@@ -300,116 +311,7 @@ if menu == "Análises":
 # NOVO LANÇAMENTO
 # ==========================================
 
-elif menu in ["Receitas", "Despesas"]:
-    st.header(f"📉 {menu}")
-    conn = get_personal_connection()
-    df = pd.read_sql_query("SELECT * FROM lancamentos", conn)
-    conn.close()
-
-    if not df.empty:
-        if menu == "Receitas":
-            df_filtered = df[df["valor"] > 0] # Assuming positive values or by category? Let's assume user inputs 'Receitas' in category or has a specific method.
-            # Actually, standard way is to assume positive or let user filter.
-            # We will use category 'Receita' or 'Salário' or just show the table filtered.
-            df_filtered = df[df['categoria'].str.contains('Receita|Salário|Rendimento', case=False, na=False)]
-        else:
-            df_filtered = df[~df['categoria'].str.contains('Receita|Salário|Rendimento', case=False, na=False)]
-
-        st.dataframe(df_filtered, use_container_width=True)
-    else:
-        st.info("Nenhum dado encontrado.")
-
-elif menu == "Orçamento":
-    st.header("📊 Orçamento")
-    st.info("Funcionalidade de orçamento em desenvolvimento. Aqui você poderá definir tetos de gastos por categoria.")
-
-
-elif menu == "Lançamentos":
-    st.header("➕ Registrar Novo Lançamento")
-    
-    st.subheader("🤖 Inserção Inteligente com IA")
-    texto_ia = st.text_input("Descreva o gasto naturalmente:", placeholder="Ex: Comprei 60 reais de farmácia hoje no cartão")
-    
-    if st.button("✨ Criar com IA", type="primary") and texto_ia:
-        try:
-            prompt = f"""
-            Analise a frase: "{texto_ia}"
-            Retorne um JSON com estas chaves (focado em finanças pessoais):
-            - "descricao": O local ou motivo (string)
-            - "valor": Valor em numero (float)
-            - "categoria": Sugira uma categoria logica (string)
-            - "metodo_pagamento": 'Pix', 'Cartão de Crédito', 'Boleto', 'Dinheiro' ou 'Transferência' (string)
-            - "data" : no Formato "%Y-%m-%d" usando como referência o dia de hoje ({datetime.date.today()})) (string)
-            - "status": 'Pago' ou 'Pendente' (string)
-            - "recorrente" : 'Sim' ou 'Não' (string)
-            - "frequencia" :  "Mensal", "Único", "Anual", "Semanal" (string)
-            """
-            
-            with st.spinner("A IA está analisando..."):
-                dados_ia = gerar_resposta_ia(prompt)
-                
-                conn = get_personal_connection()
-                cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT INTO lancamentos 
-                    (data, descricao, valor, observacao, recorrente, status, categoria, metodo_pagamento, frequencia, valor_pago)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    str(dados_ia['data']), dados_ia["descricao"], dados_ia["valor"], 
-                    "Gerado via IA: " + texto_ia,dados_ia['recorrente'], dados_ia["status"], dados_ia["categoria"], 
-                    dados_ia["metodo_pagamento"], dados_ia['frequencia'],dados_ia["valor"] if dados_ia["status"] == "Pago" else 0.0
-                ))
-                conn.commit()
-                conn.close()
-                st.success(f"Lançamento de R$ {dados_ia['valor']} inserido com sucesso!")
-                st.success(dados_ia)
-        except Exception as e:
-            st.error(f"Erro na IA. Tente preencher manualmente. Detalhes: {e}")
-
-    st.divider()
-    
-    st.subheader("✍️ Inserção Manual")
-    with st.form("form_lancamento"):
-        c1, c2 = st.columns(2)
-        data = c1.date_input("Data", datetime.date.today())
-        valor = c2.number_input("Valor Previsto (R$)", min_value=0.0, step=5.0)
-        
-        c3, c4, c5 = st.columns(3)
-        categoria = c3.text_input("Categoria")
-        metodo_pagamento = c4.selectbox("Método", ["Pix", "Cartão de Crédito", "Boleto", "Dinheiro", "Transferência"])
-        status = c5.selectbox("Status", ["Pendente", "Pago", "Agendado", "Cancelado"])
-        
-        descricao_input = st.text_input("Descrição")
-        
-        c6, c7 = st.columns(2)
-        frequencia = c6.selectbox("Frequência", ["Mensal", "Único", "Anual", "Semanal"])
-        recorrente = "Não" if frequencia == "Único" else "Sim"
-        valor_pago = c7.number_input("Valor Pago (R$)", min_value=0.0, step=5.0)
-        observacao = st.text_area("Observação")
-        
-        if st.form_submit_button("Salvar Lançamento"):
-            if descricao_input and categoria:
-                if valor == 0 and valor_pago > 0:
-                    valor = valor_pago
-                conn = get_personal_connection()
-                cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT INTO lancamentos 
-                    (data, descricao, valor, observacao, recorrente, status, categoria, metodo_pagamento, frequencia, valor_pago)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (str(data), descricao_input, valor, observacao, recorrente, status, categoria, metodo_pagamento, frequencia, valor_pago))
-                conn.commit()
-                conn.close()
-                st.success("Salvo com sucesso!")
-            else:
-                st.warning("Preencha Descrição e Categoria.")
-
-# ==========================================
-# Contas por mês (Tabela Interativa)
-# ==========================================
-elif menu == "Contas por mês":
-    st.header("📋 Gestão de Contas")
-    
+elif menu == "Despesas":   
     f1, f2 = st.columns(2)
     filtro_mes = f1.selectbox("Mês", ["Todos"] + list(range(1, 13)), index=datetime.date.today().month)
     filtro_ano = f2.number_input("Ano", min_value=2024, max_value=2030, value=datetime.date.today().year)
@@ -496,6 +398,181 @@ elif menu == "Contas por mês":
                 conn.close()
                 st.success(f"{atualizados} atualizados, {excluidos} excluídos.")
                 st.rerun()
+
+
+elif menu == "Receitas":   
+    f1, f2 = st.columns(2)
+    filtro_mes = f1.selectbox("Mês", ["Todos"] + list(range(1, 13)), index=datetime.date.today().month)
+    filtro_ano = f2.number_input("Ano", min_value=2024, max_value=2030, value=datetime.date.today().year)
+    
+    conn = get_personal_connection()
+    query = "SELECT id, data, descricao, valor, recorrente, frequencia, observacao FROM receitas WHERE 1=1"
+    params = []
+    
+    if filtro_mes != "Todos":
+        query += " AND strftime('%m', data) = ? AND strftime('%Y', data) = ?"
+        params.extend([f"{filtro_mes:02d}", str(filtro_ano)])
+        
+    query += " ORDER BY data ASC"
+    df = pd.read_sql_query(query, conn, params=tuple(params))
+    conn.close()
+    
+    if df.empty:
+        st.info("Nenhum registro encontrado.")
+    else:
+        hoje = datetime.date.today()
+        df["data"] = pd.to_datetime(df["data"]).dt.date
+        df["Excluir"] = False
+        
+        df["foi_pago"] = df["status"] == "Pago"
+        
+        def definir_situacao(row):
+            if row["foi_pago"]: return "🟢 Pago"
+            elif row["data"] < hoje: return "🔴 Atrasado"
+            else: return "🟡 A Pagar (No Prazo)"
+
+        df["Situação"] = df.apply(definir_situacao, axis=1)
+        
+        df_exibicao = df[["id", "Excluir", "foi_pago", "Situação", "data", "descricao", "valor", "valor_pago", "categoria", "metodo_pagamento", "recorrente", "frequencia", "observacao"]]
+        
+        def colorir_tabela(val):
+            if val == "🟢 Pago": return 'background-color: #d4edda; color: #155724; font-weight: bold'
+            elif val == "🔴 Atrasado": return 'background-color: #f8d7da; color: #721c24; font-weight: bold'
+            elif val == "🟡 A Pagar (No Prazo)": return 'background-color: #fff3cd; color: #856404; font-weight: bold'
+            return ''
+        
+        df_colorido = df_exibicao.style.map(colorir_tabela, subset=["Situação"])
+        
+        with st.form("form_edicao"):
+            df_editado = st.data_editor(
+                df_colorido,
+                column_config={
+                    "id": st.column_config.NumberColumn("ID", disabled=True),
+                    "Excluir": st.column_config.CheckboxColumn("❌ Excluir", default=False),
+                    "foi_pago": st.column_config.CheckboxColumn("✅ Pago?", default=False),
+                    "Situação": st.column_config.TextColumn("Situação", disabled=True),
+                    "data": st.column_config.DateColumn("Vencimento", format="DD/MM/YYYY"),
+                    "valor": st.column_config.NumberColumn("Valor Previsto (R$)", format="R$ %.2f"),
+                    "valor_pago": st.column_config.NumberColumn("Valor Pago (R$)", format="R$ %.2f"),
+                },
+                hide_index=True, width="stretch", key="editor_contas"
+            )
+            
+            if st.form_submit_button("💾 Salvar Alterações", type="primary"):
+                conn = get_personal_connection()
+                cursor = conn.cursor()
+                excluidos, atualizados = 0, 0
+                for _, row in df_editado.iterrows():
+                    if row["Excluir"]:
+                        cursor.execute("DELETE FROM lancamentos WHERE id = ?", (row["id"],))
+                        excluidos += 1
+                    else:
+                        valor_prev = row["valor"]
+                        valor_pg = row["valor_pago"]
+                        
+                        if row["foi_pago"] and valor_pg == 0:
+                            valor_pg = valor_prev
+                        elif not row["foi_pago"]:
+                            valor_pg = 0.0
+                            
+                        novo_status = "Pago" if row["foi_pago"] else "Pendente"
+                        
+                        cursor.execute("""
+                            UPDATE lancamentos 
+                            SET data = ?, descricao = ?, valor = ?, valor_pago = ?, status = ?, categoria = ?, metodo_pagamento = ?, recorrente = ?, frequencia = ?, observacao = ?
+                            WHERE id = ?
+                        """, (str(row["data"]), row["descricao"], valor_prev, valor_pg, novo_status, row["categoria"], row["metodo_pagamento"], row["recorrente"], row["frequencia"], row["observacao"], row["id"]))
+                        atualizados += 1
+                conn.commit()
+                conn.close()
+                st.success(f"{atualizados} atualizados, {excluidos} excluídos.")
+                st.rerun()
+
+
+elif menu == "Orçamento":
+    st.header("📊 Orçamento")
+    st.info("Funcionalidade de orçamento em desenvolvimento. Aqui você poderá definir tetos de gastos por categoria.")
+
+
+elif menu == "Lançamentos":
+    st.header("➕ Registrar Novo Lançamento")
+    
+    st.subheader("🤖 Inserção Inteligente com IA")
+    texto_ia = st.text_input("Descreva o gasto naturalmente:", placeholder="Ex: Comprei 60 reais de farmácia hoje no cartão")
+    
+    if st.button("✨ Criar com IA", type="primary") and texto_ia:
+        try:
+            prompt = f"""
+            Analise a frase: "{texto_ia}"
+            Retorne um JSON com estas chaves (focado em finanças pessoais):
+            - "descricao": O local ou motivo (string)
+            - "valor": Valor em numero (float)
+            - "categoria": Sugira uma categoria logica (string)
+            - "metodo_pagamento": 'Pix', 'Cartão de Crédito', 'Boleto', 'Dinheiro' ou 'Transferência' (string)
+            - "data" : no Formato "%Y-%m-%d" usando como referência o dia de hoje ({datetime.date.today()})) (string)
+            - "status": 'Pago' ou 'Pendente' (string)
+            - "recorrente" : 'Sim' ou 'Não' (string)
+            - "frequencia" :  "Mensal", "Único", "Anual", "Semanal" (string)
+            """
+            
+            with st.spinner("A IA está analisando..."):
+                dados_ia = gerar_resposta_ia(prompt)
+                
+                conn = get_personal_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO lancamentos 
+                    (data, descricao, valor, observacao, recorrente, status, categoria, metodo_pagamento, frequencia, valor_pago)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    str(dados_ia['data']), dados_ia["descricao"], dados_ia["valor"], 
+                    "Gerado via IA: " + texto_ia,dados_ia['recorrente'], dados_ia["status"], dados_ia["categoria"], 
+                    dados_ia["metodo_pagamento"], dados_ia['frequencia'],dados_ia["valor"] if dados_ia["status"] == "Pago" else 0.0
+                ))
+                conn.commit()
+                conn.close()
+                st.success(f"Lançamento de R$ {dados_ia['valor']} inserido com sucesso!")
+                st.success(dados_ia)
+        except Exception as e:
+            st.error(f"Erro na IA. Tente preencher manualmente. Detalhes: {e}")
+
+    st.divider()
+    
+    st.subheader("✍️ Inserção Manual")
+    with st.form("form_lancamento"):
+        c1, c2 = st.columns(2)
+        data = c1.date_input("Data", datetime.date.today())
+        valor = c2.number_input("Valor Previsto (R$)", min_value=0.0, step=5.0)
+        
+        c3, c4, c5 = st.columns(3)
+        categoria = c3.text_input("Categoria")
+        metodo_pagamento = c4.selectbox("Método", ["Pix", "Cartão de Crédito", "Boleto", "Dinheiro", "Transferência"])
+        status = c5.selectbox("Status", ["Pendente", "Pago", "Agendado", "Cancelado"])
+        
+        descricao_input = st.text_input("Descrição")
+        
+        c6, c7 = st.columns(2)
+        frequencia = c6.selectbox("Frequência", ["Mensal", "Único", "Anual", "Semanal"])
+        recorrente = "Não" if frequencia == "Único" else "Sim"
+        valor_pago = c7.number_input("Valor Pago (R$)", min_value=0.0, step=5.0)
+        observacao = st.text_area("Observação")
+        
+        if st.form_submit_button("Salvar Lançamento"):
+            if descricao_input and categoria:
+                if valor == 0 and valor_pago > 0:
+                    valor = valor_pago
+                conn = get_personal_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO lancamentos 
+                    (data, descricao, valor, observacao, recorrente, status, categoria, metodo_pagamento, frequencia, valor_pago)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (str(data), descricao_input, valor, observacao, recorrente, status, categoria, metodo_pagamento, frequencia, valor_pago))
+                conn.commit()
+                conn.close()
+                st.success("Salvo com sucesso!")
+            else:
+                st.warning("Preencha Descrição e Categoria.")
 
 # ==========================================
 # GERAR RECORRENTES
