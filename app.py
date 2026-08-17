@@ -9,6 +9,7 @@ from sklearn.ensemble import RandomForestRegressor
 import libsql_experimental as libsql
 import google.generativeai as genai
 import json
+from google_calendar_utils import authenticate_google_calendar, fetch_google_calendar_events, create_google_calendar_event
 
 def gerar_resposta_ia(prompt, modelo_nome='gemini-3.6-flash'):
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
@@ -603,6 +604,9 @@ elif menu_principal == "Agenda":
     st.header("📅 Agenda")
     menu_agenda = st.sidebar.radio("Agenda", ["Aulas", "Compromissos", "Eventos", "Novo Evento"])
 
+    st.sidebar.divider()
+    integrar_gcal = st.sidebar.checkbox("Integrar com Google Agenda")
+
     if menu_agenda == "Novo Evento":
         st.subheader("🤖 Inserir Evento com IA")
         texto_evento = st.text_input("Descreva o evento:", placeholder="Ex: Aula de matemática amanhã às 10h")
@@ -625,7 +629,18 @@ elif menu_principal == "Agenda":
                     )
                     conn.commit()
                     conn.close()
-                    st.success("Evento inserido com sucesso!")
+                    st.success("Evento inserido localmente com sucesso!")
+
+                    if integrar_gcal:
+                        service = authenticate_google_calendar()
+                        if service:
+                            res = create_google_calendar_event(service, dados["titulo"], str(dados["data_hora"]))
+                            if res:
+                                st.success("Evento sincronizado com o Google Agenda!")
+                            else:
+                                st.warning("Não foi possível sincronizar com o Google Agenda.")
+                        else:
+                            st.warning("Falha na autenticação do Google Agenda. Coloque credentials.json na pasta.")
                 except Exception as e:
                     st.error(f"Erro ao inserir evento: {e}")
 
@@ -634,14 +649,40 @@ elif menu_principal == "Agenda":
         df_agenda = pd.read_sql_query("SELECT * FROM agenda", conn)
         conn.close()
 
+        eventos_combinados = []
+
         if not df_agenda.empty:
             df_agenda['tipo'] = df_agenda['tipo'].str.capitalize()
-            # Handle pluralization matching (Aulas -> Aula)
             tipo_map = {"Aulas": "Aula", "Compromissos": "Compromisso", "Eventos": "Evento"}
             tipo_busca = tipo_map.get(menu_agenda, menu_agenda)
-
             df_exibir = df_agenda[df_agenda['tipo'] == tipo_busca]
-            st.dataframe(df_exibir, use_container_width=True)
+            for _, row in df_exibir.iterrows():
+                eventos_combinados.append({
+                    "Origem": "Local",
+                    "Título": row["titulo"],
+                    "Data/Hora": row["data_hora"]
+                })
+
+        if integrar_gcal:
+            service = authenticate_google_calendar()
+            if service:
+                with st.spinner("Buscando eventos do Google Agenda..."):
+                    gcal_events = fetch_google_calendar_events(service)
+                    for event in gcal_events:
+                        start = event['start'].get('dateTime', event['start'].get('date'))
+                        # Para simplificar, consideramos todos do google agenda na aba atual ou podemos classificar via IA
+                        # Aqui listaremos todos na visão se integrar_gcal for selecionado
+                        eventos_combinados.append({
+                            "Origem": "Google Agenda",
+                            "Título": event.get('summary', 'Sem Título'),
+                            "Data/Hora": start
+                        })
+            else:
+                st.warning("Falha na autenticação do Google Agenda. Coloque credentials.json na raiz do projeto para autenticar.")
+
+        if eventos_combinados:
+            df_final = pd.DataFrame(eventos_combinados)
+            st.dataframe(df_final, use_container_width=True)
         else:
             st.info("Nenhum evento encontrado.")
 
