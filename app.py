@@ -7,7 +7,15 @@ import plotly.express as px
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 import libsql_experimental as libsql
+import google.generativeai as genai
+import json
 
+def gerar_resposta_ia(prompt, modelo_nome='gemini-3.6-flash'):
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+    modelo = genai.GenerativeModel(modelo_nome)
+    resposta = modelo.generate_content(prompt)
+    texto_limpo = resposta.text.replace("```json", "").replace("```", "").strip()
+    return json.loads(texto_limpo)
 
 
 # ==========================================
@@ -49,7 +57,7 @@ def autenticar_usuario(username, senha):
     try:
         conn_p = libsql.connect(database=user_data["turso_url"], auth_token=user_data["turso_token"])
         cursor_p = conn_p.cursor()
-        cursor_p.execute("""
+        cursor_p.execute('''
             CREATE TABLE IF NOT EXISTS lancamentos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 data DATE NOT NULL,
@@ -63,7 +71,40 @@ def autenticar_usuario(username, senha):
                 frequencia TEXT,
                 valor_pago REAL
             )
-        """)
+        ''')
+        cursor_p.execute('''
+            CREATE TABLE IF NOT EXISTS tarefas (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                titulo TEXT NOT NULL,
+                data_vencimento DATE,
+                status TEXT NOT NULL
+            )
+        ''')
+        cursor_p.execute('''
+            CREATE TABLE IF NOT EXISTS agenda (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tipo TEXT NOT NULL,
+                titulo TEXT NOT NULL,
+                data_hora DATETIME
+            )
+        ''')
+        cursor_p.execute('''
+            CREATE TABLE IF NOT EXISTS estudos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tipo TEXT NOT NULL,
+                titulo TEXT NOT NULL,
+                horas REAL,
+                data DATE
+            )
+        ''')
+        cursor_p.execute('''
+            CREATE TABLE IF NOT EXISTS projetos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                categoria TEXT NOT NULL,
+                nome TEXT NOT NULL,
+                status TEXT NOT NULL
+            )
+        ''')
         conn_p.commit()
         conn_p.close()
         return user_data
@@ -106,12 +147,21 @@ if st.sidebar.button("Sair"):
     st.rerun()
 
 st.sidebar.divider()
-menu = st.sidebar.radio("Navegação", ["Dashboard Analytics", "Contas por mês", "Novo Lançamento", "Gerar Recorrentes"])
+menu_principal = st.sidebar.selectbox(
+    "Módulo",
+    ["Visão Geral", "Finanças", "Tarefas", "Agenda", "Estudos", "Projetos", "Dashboard"]
+)
+
+st.sidebar.divider()
+if menu_principal == "Finanças":
+    menu = st.sidebar.radio("Sub-menu", ["Lançamentos", "Receitas", "Despesas", "Orçamento", "Análises", "Contas por mês", "Gerar Recorrentes"])
+else:
+    menu = menu_principal
 
 # ==========================================
 # DASHBOARD ANALYTICS 
 # ==========================================
-if menu == "Dashboard Analytics":
+if menu == "Análises":
     st.header("📈 Dashboard Analytics Preditivo")
     
     c1, c2 = st.columns(2)
@@ -249,7 +299,32 @@ if menu == "Dashboard Analytics":
 # ==========================================
 # NOVO LANÇAMENTO
 # ==========================================
-elif menu == "Novo Lançamento":
+
+elif menu in ["Receitas", "Despesas"]:
+    st.header(f"📉 {menu}")
+    conn = get_personal_connection()
+    df = pd.read_sql_query("SELECT * FROM lancamentos", conn)
+    conn.close()
+
+    if not df.empty:
+        if menu == "Receitas":
+            df_filtered = df[df["valor"] > 0] # Assuming positive values or by category? Let's assume user inputs 'Receitas' in category or has a specific method.
+            # Actually, standard way is to assume positive or let user filter.
+            # We will use category 'Receita' or 'Salário' or just show the table filtered.
+            df_filtered = df[df['categoria'].str.contains('Receita|Salário|Rendimento', case=False, na=False)]
+        else:
+            df_filtered = df[~df['categoria'].str.contains('Receita|Salário|Rendimento', case=False, na=False)]
+
+        st.dataframe(df_filtered, use_container_width=True)
+    else:
+        st.info("Nenhum dado encontrado.")
+
+elif menu == "Orçamento":
+    st.header("📊 Orçamento")
+    st.info("Funcionalidade de orçamento em desenvolvimento. Aqui você poderá definir tetos de gastos por categoria.")
+
+
+elif menu == "Lançamentos":
     st.header("➕ Registrar Novo Lançamento")
     
     st.subheader("🤖 Inserção Inteligente com IA")
@@ -257,12 +332,6 @@ elif menu == "Novo Lançamento":
     
     if st.button("✨ Criar com IA", type="primary") and texto_ia:
         try:
-            import google.generativeai as genai
-            import json
-            
-            genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-            modelo = genai.GenerativeModel('gemini-3.6-flash')
-            
             prompt = f"""
             Analise a frase: "{texto_ia}"
             Retorne um JSON com estas chaves (focado em finanças pessoais):
@@ -277,9 +346,7 @@ elif menu == "Novo Lançamento":
             """
             
             with st.spinner("A IA está analisando..."):
-                resposta = modelo.generate_content(prompt)
-                texto_limpo = resposta.text.replace("```json", "").replace("```", "").strip()
-                dados_ia = json.loads(texto_limpo)
+                dados_ia = gerar_resposta_ia(prompt)
                 
                 conn = get_personal_connection()
                 cursor = conn.cursor()
@@ -474,3 +541,273 @@ elif menu == "Gerar Recorrentes":
             conn.commit()
             conn.close()
             st.success(f"{novos} lançamentos criados!")
+# ==========================================
+# MÓDULO: TAREFAS
+# ==========================================
+if menu_principal == "Tarefas":
+    st.header("✅ Gestão de Tarefas")
+    menu_tarefas = st.sidebar.radio("Tarefas", ["Hoje", "Próximas", "Atrasadas", "Concluídas", "Nova Tarefa"])
+
+    if menu_tarefas == "Nova Tarefa":
+        st.subheader("🤖 Inserir Tarefa com IA")
+        texto_tarefa = st.text_input("Descreva a tarefa:", placeholder="Ex: Preciso entregar o relatório amanhã")
+        if st.button("Criar Tarefa", type="primary") and texto_tarefa:
+            prompt = f"""
+            Analise a tarefa: "{texto_tarefa}"
+            Retorne um JSON:
+            - "titulo": Nome da tarefa (string)
+            - "data_vencimento": Data no formato "%Y-%m-%d" (referência: hoje é {datetime.date.today()})
+            - "status": 'Pendente' (string)
+            """
+            with st.spinner("Analisando..."):
+                try:
+                    dados = gerar_resposta_ia(prompt)
+                    conn = get_personal_connection()
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "INSERT INTO tarefas (titulo, data_vencimento, status) VALUES (?, ?, ?)",
+                        (dados["titulo"], str(dados["data_vencimento"]), dados["status"])
+                    )
+                    conn.commit()
+                    conn.close()
+                    st.success("Tarefa inserida com sucesso!")
+                except Exception as e:
+                    st.error(f"Erro ao inserir tarefa: {e}")
+
+    else:
+        conn = get_personal_connection()
+        df_tarefas = pd.read_sql_query("SELECT * FROM tarefas", conn)
+        conn.close()
+
+        if not df_tarefas.empty:
+            df_tarefas['data_vencimento'] = pd.to_datetime(df_tarefas['data_vencimento']).dt.date
+            hoje = datetime.date.today()
+
+            if menu_tarefas == "Hoje":
+                df_exibir = df_tarefas[(df_tarefas['data_vencimento'] == hoje) & (df_tarefas['status'] != 'Concluída')]
+            elif menu_tarefas == "Próximas":
+                df_exibir = df_tarefas[(df_tarefas['data_vencimento'] > hoje) & (df_tarefas['status'] != 'Concluída')]
+            elif menu_tarefas == "Atrasadas":
+                df_exibir = df_tarefas[(df_tarefas['data_vencimento'] < hoje) & (df_tarefas['status'] != 'Concluída')]
+            else: # Concluídas
+                df_exibir = df_tarefas[df_tarefas['status'] == 'Concluída']
+
+            st.dataframe(df_exibir, use_container_width=True)
+        else:
+            st.info("Nenhuma tarefa encontrada.")
+
+# ==========================================
+# MÓDULO: AGENDA
+# ==========================================
+elif menu_principal == "Agenda":
+    st.header("📅 Agenda")
+    menu_agenda = st.sidebar.radio("Agenda", ["Aulas", "Compromissos", "Eventos", "Novo Evento"])
+
+    if menu_agenda == "Novo Evento":
+        st.subheader("🤖 Inserir Evento com IA")
+        texto_evento = st.text_input("Descreva o evento:", placeholder="Ex: Aula de matemática amanhã às 10h")
+        if st.button("Criar Evento", type="primary") and texto_evento:
+            prompt = f"""
+            Analise a frase: "{texto_evento}"
+            Retorne um JSON:
+            - "tipo": 'Aula', 'Compromisso' ou 'Evento' (string)
+            - "titulo": Título do evento (string)
+            - "data_hora": Formato "%Y-%m-%d %H:%M" (referência: hoje é {datetime.datetime.now().strftime("%Y-%m-%d %H:%M")})
+            """
+            with st.spinner("Analisando..."):
+                try:
+                    dados = gerar_resposta_ia(prompt)
+                    conn = get_personal_connection()
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "INSERT INTO agenda (tipo, titulo, data_hora) VALUES (?, ?, ?)",
+                        (dados["tipo"], dados["titulo"], str(dados["data_hora"]))
+                    )
+                    conn.commit()
+                    conn.close()
+                    st.success("Evento inserido com sucesso!")
+                except Exception as e:
+                    st.error(f"Erro ao inserir evento: {e}")
+
+    else:
+        conn = get_personal_connection()
+        df_agenda = pd.read_sql_query("SELECT * FROM agenda", conn)
+        conn.close()
+
+        if not df_agenda.empty:
+            df_agenda['tipo'] = df_agenda['tipo'].str.capitalize()
+            # Handle pluralization matching (Aulas -> Aula)
+            tipo_map = {"Aulas": "Aula", "Compromissos": "Compromisso", "Eventos": "Evento"}
+            tipo_busca = tipo_map.get(menu_agenda, menu_agenda)
+
+            df_exibir = df_agenda[df_agenda['tipo'] == tipo_busca]
+            st.dataframe(df_exibir, use_container_width=True)
+        else:
+            st.info("Nenhum evento encontrado.")
+
+# ==========================================
+# MÓDULO: ESTUDOS
+# ==========================================
+elif menu_principal == "Estudos":
+    st.header("🎓 Estudos")
+    menu_estudos = st.sidebar.radio("Estudos", ["Disciplinas", "Trabalhos", "Provas", "Horas estudadas", "Novo Registro"])
+
+    if menu_estudos == "Novo Registro":
+        st.subheader("🤖 Inserir Registro de Estudo com IA")
+        texto_estudo = st.text_input("Descreva a atividade:", placeholder="Ex: Estudei 2 horas de Física hoje")
+        if st.button("Salvar Registro", type="primary") and texto_estudo:
+            prompt = f"""
+            Analise a frase: "{texto_estudo}"
+            Retorne um JSON:
+            - "tipo": 'Disciplina', 'Trabalho', 'Prova' ou 'Horas' (string)
+            - "titulo": Assunto ou título (string)
+            - "horas": Quantidade de horas se aplicável, senão 0 (float)
+            - "data": Formato "%Y-%m-%d" (referência: hoje é {datetime.date.today()})
+            """
+            with st.spinner("Analisando..."):
+                try:
+                    dados = gerar_resposta_ia(prompt)
+                    conn = get_personal_connection()
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "INSERT INTO estudos (tipo, titulo, horas, data) VALUES (?, ?, ?, ?)",
+                        (dados["tipo"], dados["titulo"], dados["horas"], str(dados["data"]))
+                    )
+                    conn.commit()
+                    conn.close()
+                    st.success("Registro salvo com sucesso!")
+                except Exception as e:
+                    st.error(f"Erro ao salvar registro: {e}")
+
+    else:
+        conn = get_personal_connection()
+        df_estudos = pd.read_sql_query("SELECT * FROM estudos", conn)
+        conn.close()
+
+        if not df_estudos.empty:
+            df_estudos['tipo'] = df_estudos['tipo'].str.capitalize()
+            tipo_map = {"Disciplinas": "Disciplina", "Trabalhos": "Trabalho", "Provas": "Prova", "Horas estudadas": "Horas"}
+            tipo_busca = tipo_map.get(menu_estudos, menu_estudos)
+
+            df_exibir = df_estudos[df_estudos['tipo'] == tipo_busca]
+            st.dataframe(df_exibir, use_container_width=True)
+        else:
+            st.info("Nenhum registro encontrado.")
+
+# ==========================================
+# MÓDULO: PROJETOS
+# ==========================================
+elif menu_principal == "Projetos":
+    st.header("💼 Projetos")
+    menu_projetos = st.sidebar.radio("Projetos", ["Projetos pessoais", "PET", "IC", "Programação", "Novo Projeto"])
+
+    if menu_projetos == "Novo Projeto":
+        st.subheader("🤖 Inserir Projeto com IA")
+        texto_projeto = st.text_input("Descreva o projeto:", placeholder="Ex: Iniciei um projeto de automação no PET")
+        if st.button("Salvar Projeto", type="primary") and texto_projeto:
+            prompt = f"""
+            Analise a frase: "{texto_projeto}"
+            Retorne um JSON:
+            - "categoria": 'Projetos pessoais', 'PET', 'IC' ou 'Programação' (string)
+            - "nome": Nome ou descrição curta do projeto (string)
+            - "status": 'Em andamento', 'Planejado' ou 'Concluído' (string)
+            """
+            with st.spinner("Analisando..."):
+                try:
+                    dados = gerar_resposta_ia(prompt)
+                    conn = get_personal_connection()
+                    cursor = conn.cursor()
+                    cursor.execute(
+                        "INSERT INTO projetos (categoria, nome, status) VALUES (?, ?, ?)",
+                        (dados["categoria"], dados["nome"], dados["status"])
+                    )
+                    conn.commit()
+                    conn.close()
+                    st.success("Projeto salvo com sucesso!")
+                except Exception as e:
+                    st.error(f"Erro ao salvar projeto: {e}")
+
+    else:
+        conn = get_personal_connection()
+        df_projetos = pd.read_sql_query("SELECT * FROM projetos", conn)
+        conn.close()
+
+        if not df_projetos.empty:
+            df_exibir = df_projetos[df_projetos['categoria'].str.contains(menu_projetos, case=False, na=False)]
+            st.dataframe(df_exibir, use_container_width=True)
+        else:
+            st.info("Nenhum projeto encontrado.")
+
+# ==========================================
+# MÓDULO: VISÃO GERAL / DASHBOARD
+# ==========================================
+elif menu_principal in ["Visão Geral", "Dashboard"]:
+    st.header(f"📊 {menu_principal}")
+
+    conn = get_personal_connection()
+    try:
+        df_lancamentos = pd.read_sql_query("SELECT * FROM lancamentos", conn)
+        df_tarefas = pd.read_sql_query("SELECT * FROM tarefas", conn)
+        df_agenda = pd.read_sql_query("SELECT * FROM agenda", conn)
+        df_projetos = pd.read_sql_query("SELECT * FROM projetos", conn)
+    finally:
+        conn.close()
+
+    c1, c2 = st.columns(2)
+
+    with c1:
+        st.subheader("💰 Situação Financeira")
+        if not df_lancamentos.empty:
+            df_lancamentos["dt_data"] = pd.to_datetime(df_lancamentos["data"])
+            df_mes = df_lancamentos[(df_lancamentos["dt_data"].dt.month == datetime.date.today().month) & (df_lancamentos["dt_data"].dt.year == datetime.date.today().year)]
+            receitas = df_mes[df_mes['categoria'].str.contains('Receita|Salário|Rendimento', case=False, na=False)]['valor'].sum()
+            despesas = df_mes[~df_mes['categoria'].str.contains('Receita|Salário|Rendimento', case=False, na=False)]['valor'].sum()
+            st.metric("Saldo do Mês", f"R$ {receitas - despesas:.2f}", f"Receitas: {receitas:.2f} | Despesas: {despesas:.2f}")
+        else:
+            st.info("Sem dados financeiros.")
+
+        st.subheader("✅ Tarefas Pendentes")
+        if not df_tarefas.empty:
+            pendentes = df_tarefas[df_tarefas['status'] != 'Concluída']
+            st.metric("Total Pendente", len(pendentes))
+        else:
+            st.info("Sem tarefas pendentes.")
+
+    with c2:
+        st.subheader("📅 Próximos Compromissos")
+        if not df_agenda.empty:
+            df_agenda["data_hora"] = pd.to_datetime(df_agenda["data_hora"])
+            futuros = df_agenda[df_agenda["data_hora"] >= pd.Timestamp.now()]
+            st.metric("Eventos Futuros", len(futuros))
+        else:
+            st.info("Sem eventos agendados.")
+
+        st.subheader("📈 Progresso dos Projetos")
+        if not df_projetos.empty:
+            andamento = df_projetos[df_projetos['status'] == 'Em andamento']
+            st.metric("Projetos em Andamento", len(andamento))
+        else:
+            st.info("Sem projetos ativos.")
+
+    st.divider()
+    if st.button("✨ Gerar Resumo com IA (Visão Global)", type="primary"):
+        with st.spinner("A IA está analisando sua vida..."):
+            resumo_dados = f"""
+            Finanças do Mês: Receitas {receitas if not df_lancamentos.empty else 0}, Despesas {despesas if not df_lancamentos.empty else 0}.
+            Tarefas Pendentes: {len(df_tarefas[df_tarefas['status'] != 'Concluída']) if not df_tarefas.empty else 0}.
+            Eventos Futuros: {len(df_agenda[pd.to_datetime(df_agenda['data_hora']) >= pd.Timestamp.now()]) if not df_agenda.empty else 0}.
+            Projetos Ativos: {len(df_projetos[df_projetos['status'] == 'Em andamento']) if not df_projetos.empty else 0}.
+            """
+            prompt_resumo = f"""
+            Você é um assistente pessoal inteligente. Com base nos dados abaixo, faça um resumo motivacional
+            e estratégico do momento do usuário, em um tom encorajador e direto. Retorne apenas o texto formatado em Markdown.
+            DADOS:
+            {resumo_dados}
+            """
+            try:
+                genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+                modelo = genai.GenerativeModel('gemini-3.6-flash')
+                resposta = modelo.generate_content(prompt_resumo)
+                st.markdown(resposta.text)
+            except Exception as e:
+                st.error(f"Erro ao gerar resumo: {e}")
