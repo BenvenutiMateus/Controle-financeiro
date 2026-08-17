@@ -7,3 +7,4 @@ financeiro.db
 .secrets.toml
 secrets.toml
 .venv/
+.__pycache__/
