@@ -546,7 +546,7 @@ elif menu == "Gerar Recorrentes":
 # ==========================================
 if menu_principal == "Tarefas":
     st.header("✅ Gestão de Tarefas")
-    menu_tarefas = st.sidebar.radio("Tarefas", ["Hoje", "Próximas", "Atrasadas", "Concluídas", "Nova Tarefa"])
+    menu_tarefas = st.sidebar.radio("Tarefas", ["A fazer", "Concluídas", "Nova Tarefa"])
 
     if menu_tarefas == "Nova Tarefa":
         st.subheader("🤖 Inserir Tarefa com IA")
@@ -583,13 +583,9 @@ if menu_principal == "Tarefas":
             df_tarefas['data_vencimento'] = pd.to_datetime(df_tarefas['data_vencimento']).dt.date
             hoje = datetime.date.today()
 
-            if menu_tarefas == "Hoje":
-                df_exibir = df_tarefas[(df_tarefas['data_vencimento'] == hoje) & (df_tarefas['status'] != 'Concluída')]
-            elif menu_tarefas == "Próximas":
-                df_exibir = df_tarefas[(df_tarefas['data_vencimento'] > hoje) & (df_tarefas['status'] != 'Concluída')]
-            elif menu_tarefas == "Atrasadas":
-                df_exibir = df_tarefas[(df_tarefas['data_vencimento'] < hoje) & (df_tarefas['status'] != 'Concluída')]
-            else: # Concluídas
+            if menu_tarefas == "A fazer":
+                df_exibir = df_tarefas[df_tarefas['status'] == 'Pendente']
+            elif menu_tarefas == "Concluídas":
                 df_exibir = df_tarefas[df_tarefas['status'] == 'Concluída']
 
             st.dataframe(df_exibir, use_container_width=True)
