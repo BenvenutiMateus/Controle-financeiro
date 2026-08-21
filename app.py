@@ -80,7 +80,8 @@ def autenticar_usuario(username, senha):
                 valor REAL NOT NULL,
                 observacao TEXT,
                 recorrente TEXT NOT NULL,
-                frequencia TEXT
+                frequencia TEXT,
+                categoria TEXT NOT NULL
         )
         ''')
         cursor_p.execute('''
@@ -423,34 +424,19 @@ elif menu == "Receitas":
         hoje = datetime.date.today()
         df["data"] = pd.to_datetime(df["data"]).dt.date
         df["Excluir"] = False
-        
-        df["foi_pago"] = df["status"] == "Pago"
-        
-        def definir_situacao(row):
-            if row["foi_pago"]: return "🟢 Pago"
-            elif row["data"] < hoje: return "🔴 Atrasado"
-            else: return "🟡 A Pagar (No Prazo)"
 
-        df["Situação"] = df.apply(definir_situacao, axis=1)
         
-        df_exibicao = df[["id", "Excluir", "foi_pago", "Situação", "data", "descricao", "valor", "valor_pago", "categoria", "metodo_pagamento", "recorrente", "frequencia", "observacao"]]
+        df_exibicao = df[["id", "Excluir", "data", "descricao", "valor", "categoria", "recorrente", "frequencia", "observacao"]]
+
         
-        def colorir_tabela(val):
-            if val == "🟢 Pago": return 'background-color: #d4edda; color: #155724; font-weight: bold'
-            elif val == "🔴 Atrasado": return 'background-color: #f8d7da; color: #721c24; font-weight: bold'
-            elif val == "🟡 A Pagar (No Prazo)": return 'background-color: #fff3cd; color: #856404; font-weight: bold'
-            return ''
-        
-        df_colorido = df_exibicao.style.map(colorir_tabela, subset=["Situação"])
+
         
         with st.form("form_edicao"):
             df_editado = st.data_editor(
-                df_colorido,
+                df_exibicao,
                 column_config={
                     "id": st.column_config.NumberColumn("ID", disabled=True),
                     "Excluir": st.column_config.CheckboxColumn("❌ Excluir", default=False),
-                    "foi_pago": st.column_config.CheckboxColumn("✅ Pago?", default=False),
-                    "Situação": st.column_config.TextColumn("Situação", disabled=True),
                     "data": st.column_config.DateColumn("Vencimento", format="DD/MM/YYYY"),
                     "valor": st.column_config.NumberColumn("Valor Previsto (R$)", format="R$ %.2f"),
                     "valor_pago": st.column_config.NumberColumn("Valor Pago (R$)", format="R$ %.2f"),
@@ -519,6 +505,12 @@ elif menu == "Lançamentos":
             Se for receita:
             Retorne um JSON com estas chaves (focado em finanças pessoais):
             - "tipo": 'Despesa' (string)
+            - "data": no Formato "%Y-%m-%d" usando como referência o dia de hoje ({datetime.date.today()})) (string)
+            - "descricao": O local ou motivo (string)
+            - "categoria": Sugira uma categoria logica (string)
+            - "valor": Valor em numero (float)
+            - "recorrente" : 'Sim' ou 'Não' (string)
+            - "frequencia" :  "Mensal", "Único", "Anual", "Semanal" (string)
             """
             
             with st.spinner("A IA está analisando..."):
@@ -526,19 +518,35 @@ elif menu == "Lançamentos":
                 
                 conn = get_personal_connection()
                 cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT INTO lancamentos 
-                    (data, descricao, valor, observacao, recorrente, status, categoria, metodo_pagamento, frequencia, valor_pago)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    str(dados_ia['data']), dados_ia["descricao"], dados_ia["valor"], 
-                    "Gerado via IA: " + texto_ia,dados_ia['recorrente'], dados_ia["status"], dados_ia["categoria"], 
-                    dados_ia["metodo_pagamento"], dados_ia['frequencia'],dados_ia["valor"] if dados_ia["status"] == "Pago" else 0.0
-                ))
-                conn.commit()
-                conn.close()
-                st.success(f"Lançamento de R$ {dados_ia['valor']} inserido com sucesso!")
-                st.success(dados_ia)
+                if dados_ia['tipo'] == 'Despesa':
+                    cursor.execute("""
+                        INSERT INTO lancamentos 
+                        (data, descricao, valor, observacao, recorrente, status, categoria, metodo_pagamento, frequencia, valor_pago)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        str(dados_ia['data']), dados_ia["descricao"], dados_ia["valor"], 
+                        "Gerado via IA: " + texto_ia,dados_ia['recorrente'], dados_ia["status"], dados_ia["categoria"], 
+                        dados_ia["metodo_pagamento"], dados_ia['frequencia'],dados_ia["valor"] if dados_ia["status"] == "Pago" else 0.0
+                    ))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Lançamento de R$ {dados_ia['valor']} inserido com sucesso!")
+                    st.success(dados_ia)
+                elif dados_ia['tipo'] == 'Receita':
+                    cursor.execute("""
+                        INSERT INTO receitas 
+                        (data, descricao, valor, observacao, recorrente, frequencia)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (
+                        str(dados_ia['data']), dados_ia["descricao"], dados_ia["valor"], 
+                        "Gerado via IA: " + texto_ia,dados_ia['recorrente'], dados_ia['frequencia']
+                    ))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Receita de R$ {dados_ia['valor']} inserido com sucesso!")
+                    st.success(dados_ia)
+                else:
+                    st.error("Erro na IA. Tente preencher manualmente. Detalhes: {e}")
         except Exception as e:
             st.error(f"Erro na IA. Tente preencher manualmente. Detalhes: {e}")
 
