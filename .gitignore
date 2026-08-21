@@ -7,4 +7,7 @@ financeiro.db
 .secrets.toml
 secrets.toml
 .venv/
-.__pycache__/
+__pycache__/
+*.pyc
+*.pyo
+streamlit_output.log
