@@ -9,6 +9,31 @@ from sklearn.ensemble import RandomForestRegressor
 import libsql_experimental as libsql
 import google.generativeai as genai
 import json
+import os
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+
+# If modifying these scopes, delete the file token.json.
+SCOPES = ['https://www.googleapis.com/auth/calendar']
+
+def get_google_calendar_service():
+    creds = None
+    if os.path.exists('token.json'):
+        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            if not os.path.exists('credentials.json'):
+                st.warning("Arquivo credentials.json não encontrado. A integração com o Google Calendar está desativada.")
+                return None
+            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
+            creds = flow.run_local_server(port=0)
+        with open('token.json', 'w') as token:
+            token.write(creds.to_json())
+    return build('calendar', 'v3', credentials=creds)
 
 def gerar_resposta_ia(prompt, modelo_nome='gemini-3.6-flash'):
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
@@ -603,6 +628,53 @@ elif menu_principal == "Agenda":
     st.header("📅 Agenda")
     menu_agenda = st.sidebar.radio("Agenda", ["Aulas", "Compromissos", "Eventos", "Novo Evento"])
 
+    if st.sidebar.button("Sincronizar Google Calendar"):
+        service = get_google_calendar_service()
+        if service:
+            with st.spinner("Sincronizando eventos..."):
+                try:
+                    now = datetime.datetime.utcnow().isoformat() + 'Z'  # 'Z' indicates UTC time
+                    events_result = service.events().list(calendarId='primary', timeMin=now,
+                                                        maxResults=50, singleEvents=True,
+                                                        orderBy='startTime').execute()
+                    events = events_result.get('items', [])
+
+                    if not events:
+                        st.sidebar.info("Nenhum evento futuro encontrado no Google Calendar.")
+                    else:
+                        conn = get_personal_connection()
+                        cursor = conn.cursor()
+                        novos_eventos = 0
+                        for event in events:
+                            start = event['start'].get('dateTime', event['start'].get('date'))
+                            try:
+                                # Convert ISO format to %Y-%m-%d %H:%M
+                                dt_obj = datetime.datetime.fromisoformat(start.replace('Z', '+00:00'))
+                                data_hora_str = dt_obj.strftime('%Y-%m-%d %H:%M')
+                            except ValueError:
+                                data_hora_str = start # Fallback
+
+                            titulo = event.get('summary', 'Sem Título')
+
+                            # Check if exists
+                            cursor.execute("SELECT id FROM agenda WHERE titulo = ? AND data_hora = ?", (titulo, data_hora_str))
+                            if not cursor.fetchone():
+                                cursor.execute(
+                                    "INSERT INTO agenda (tipo, titulo, data_hora) VALUES (?, ?, ?)",
+                                    ("Evento", titulo, data_hora_str)
+                                )
+                                novos_eventos += 1
+
+                        conn.commit()
+                        conn.close()
+                        if novos_eventos > 0:
+                            st.sidebar.success(f"{novos_eventos} novos eventos sincronizados com sucesso!")
+                            st.rerun()
+                        else:
+                            st.sidebar.info("Nenhum evento novo para sincronizar.")
+                except Exception as e:
+                    st.sidebar.error(f"Erro ao sincronizar: {e}")
+
     if menu_agenda == "Novo Evento":
         st.subheader("🤖 Inserir Evento com IA")
         texto_evento = st.text_input("Descreva o evento:", placeholder="Ex: Aula de matemática amanhã às 10h")
@@ -625,7 +697,35 @@ elif menu_principal == "Agenda":
                     )
                     conn.commit()
                     conn.close()
-                    st.success("Evento inserido com sucesso!")
+
+                    # Push to Google Calendar
+                    service = get_google_calendar_service()
+                    if service:
+                        try:
+                            # Convert "%Y-%m-%d %H:%M" to ISO format
+                            dt_obj = datetime.datetime.strptime(str(dados["data_hora"]), '%Y-%m-%d %H:%M')
+                            start_iso = dt_obj.isoformat()
+                            end_iso = (dt_obj + datetime.timedelta(hours=1)).isoformat() # Assume 1h duration
+
+                            event_body = {
+                                'summary': dados["titulo"],
+                                'description': f"Gerado via IA: {texto_evento}",
+                                'start': {
+                                    'dateTime': start_iso,
+                                    'timeZone': 'America/Sao_Paulo', # Use a valid default timezone
+                                },
+                                'end': {
+                                    'dateTime': end_iso,
+                                    'timeZone': 'America/Sao_Paulo',
+                                },
+                            }
+                            service.events().insert(calendarId='primary', body=event_body).execute()
+                            st.success("Evento inserido localmente e sincronizado no Google Calendar!")
+                        except Exception as e_cal:
+                            st.warning(f"Evento inserido localmente, mas falha ao enviar ao Google Calendar: {e_cal}")
+                    else:
+                        st.success("Evento inserido localmente com sucesso! (Google Calendar não configurado)")
+
                 except Exception as e:
                     st.error(f"Erro ao inserir evento: {e}")
 
