@@ -18,6 +18,69 @@ from googleapiclient.discovery import build
 # If modifying these scopes, delete the file token.json.
 SCOPES = ['https://www.googleapis.com/auth/calendar']
 
+CATEGORIAS_DESPESA = [
+    "Moradia", "Alimentação", "Transporte", "Saúde", "Educação", "Lazer",
+    "Assinaturas", "Impostos", "Mercado", "Farmácia", "Outros"
+]
+
+CATEGORIAS_RECEITA = [
+    "Salário", "Freelance", "Investimentos", "Vendas", "Reembolso", "Outros"
+]
+
+METODOS_PAGAMENTO = ["Pix", "Cartão de Crédito", "Boleto", "Dinheiro", "Transferência"]
+FREQUENCIAS = ["Mensal", "Único", "Anual", "Semanal"]
+STATUS_DESPESA = ["Pendente", "Pago", "Agendado", "Cancelado"]
+
+def normalizar_texto(valor):
+    return " ".join(str(valor).strip().split()) if valor is not None else ""
+
+def validar_lancamento_despesa(data, descricao, categoria, valor, valor_pago, status):
+    erros = []
+    descricao = normalizar_texto(descricao)
+    categoria = normalizar_texto(categoria)
+    status = normalizar_texto(status)
+
+    if not isinstance(data, datetime.date):
+        erros.append("Data inválida.")
+    if not descricao:
+        erros.append("Descrição é obrigatória.")
+    if len(descricao) > 120:
+        erros.append("Descrição deve ter no máximo 120 caracteres.")
+    if not categoria:
+        erros.append("Categoria é obrigatória.")
+    if valor is None or valor < 0:
+        erros.append("Valor previsto deve ser maior ou igual a zero.")
+    if valor_pago is None or valor_pago < 0:
+        erros.append("Valor pago deve ser maior ou igual a zero.")
+    if status not in STATUS_DESPESA:
+        erros.append("Status inválido.")
+    if status == "Pago" and valor_pago <= 0:
+        erros.append("Para status Pago, informe valor pago maior que zero.")
+    if valor == 0 and valor_pago == 0:
+        erros.append("Informe ao menos um valor maior que zero.")
+    if valor > 0 and valor_pago > valor and status != "Pago":
+        erros.append("Valor pago não pode ser maior que o valor previsto quando o status não é Pago.")
+
+    return erros, descricao, categoria
+
+def validar_receita(data, descricao, categoria, valor):
+    erros = []
+    descricao = normalizar_texto(descricao)
+    categoria = normalizar_texto(categoria)
+
+    if not isinstance(data, datetime.date):
+        erros.append("Data inválida.")
+    if not descricao:
+        erros.append("Descrição é obrigatória.")
+    if len(descricao) > 120:
+        erros.append("Descrição deve ter no máximo 120 caracteres.")
+    if not categoria:
+        erros.append("Categoria é obrigatória.")
+    if valor is None or valor <= 0:
+        erros.append("Valor da receita deve ser maior que zero.")
+
+    return erros, descricao, categoria
+
 def get_google_calendar_service():
     creds = None
     if os.path.exists('token.json'):
@@ -392,7 +455,7 @@ elif menu == "Despesas":
                     "valor": st.column_config.NumberColumn("Valor Previsto (R$)", format="R$ %.2f"),
                     "valor_pago": st.column_config.NumberColumn("Valor Pago (R$)", format="R$ %.2f"),
                 },
-                hide_index=True, width="stretch", key="editor_contas"
+                hide_index=True, width="stretch", key="editor_despesas"
             )
             
             if st.form_submit_button("💾 Salvar Alterações", type="primary"):
@@ -432,7 +495,7 @@ elif menu == "Receitas":
     filtro_ano = f2.number_input("Ano", min_value=2024, max_value=2030, value=datetime.date.today().year)
     
     conn = get_personal_connection()
-    query = "SELECT id, data, descricao, valor, recorrente, frequencia, observacao FROM receitas WHERE 1=1"
+    query = "SELECT id, data, descricao, valor, categoria, recorrente, frequencia, observacao FROM receitas WHERE 1=1"
     params = []
     
     if filtro_mes != "Todos":
@@ -446,27 +509,22 @@ elif menu == "Receitas":
     if df.empty:
         st.info("Nenhum registro encontrado.")
     else:
-        hoje = datetime.date.today()
         df["data"] = pd.to_datetime(df["data"]).dt.date
         df["Excluir"] = False
+        df_exibicao = df[["id", "Excluir", "data", "descricao", "categoria", "valor", "recorrente", "frequencia", "observacao"]]
 
-        
-        df_exibicao = df[["id", "Excluir", "data", "descricao", "valor", "categoria", "recorrente", "frequencia", "observacao"]]
-
-        
-
-        
         with st.form("form_edicao"):
             df_editado = st.data_editor(
                 df_exibicao,
                 column_config={
                     "id": st.column_config.NumberColumn("ID", disabled=True),
                     "Excluir": st.column_config.CheckboxColumn("❌ Excluir", default=False),
-                    "data": st.column_config.DateColumn("Vencimento", format="DD/MM/YYYY"),
-                    "valor": st.column_config.NumberColumn("Valor Previsto (R$)", format="R$ %.2f"),
-                    "valor_pago": st.column_config.NumberColumn("Valor Pago (R$)", format="R$ %.2f"),
+                    "data": st.column_config.DateColumn("Data", format="DD/MM/YYYY"),
+                    "descricao": st.column_config.TextColumn("Descrição"),
+                    "categoria": st.column_config.SelectboxColumn("Categoria", options=CATEGORIAS_RECEITA),
+                    "valor": st.column_config.NumberColumn("Valor (R$)", min_value=0.01, format="R$ %.2f"),
                 },
-                hide_index=True, width="stretch", key="editor_contas"
+                hide_index=True, width="stretch", key="editor_receitas"
             )
             
             if st.form_submit_button("💾 Salvar Alterações", type="primary"):
@@ -475,24 +533,18 @@ elif menu == "Receitas":
                 excluidos, atualizados = 0, 0
                 for _, row in df_editado.iterrows():
                     if row["Excluir"]:
-                        cursor.execute("DELETE FROM lancamentos WHERE id = ?", (row["id"],))
+                        cursor.execute("DELETE FROM receitas WHERE id = ?", (row["id"],))
                         excluidos += 1
                     else:
-                        valor_prev = row["valor"]
-                        valor_pg = row["valor_pago"]
-                        
-                        if row["foi_pago"] and valor_pg == 0:
-                            valor_pg = valor_prev
-                        elif not row["foi_pago"]:
-                            valor_pg = 0.0
-                            
-                        novo_status = "Pago" if row["foi_pago"] else "Pendente"
-                        
+                        erros, descricao_ok, categoria_ok = validar_receita(row["data"], row["descricao"], row["categoria"], row["valor"])
+                        if erros:
+                            st.error(f"Receita ID {int(row['id'])}: {' | '.join(erros)}")
+                            continue
                         cursor.execute("""
-                            UPDATE lancamentos 
-                            SET data = ?, descricao = ?, valor = ?, valor_pago = ?, status = ?, categoria = ?, metodo_pagamento = ?, recorrente = ?, frequencia = ?, observacao = ?
+                            UPDATE receitas
+                            SET data = ?, descricao = ?, categoria = ?, valor = ?, recorrente = ?, frequencia = ?, observacao = ?
                             WHERE id = ?
-                        """, (str(row["data"]), row["descricao"], valor_prev, valor_pg, novo_status, row["categoria"], row["metodo_pagamento"], row["recorrente"], row["frequencia"], row["observacao"], row["id"]))
+                        """, (str(row["data"]), descricao_ok, categoria_ok, float(row["valor"]), row["recorrente"], row["frequencia"], row["observacao"], row["id"]))
                         atualizados += 1
                 conn.commit()
                 conn.close()
@@ -584,20 +636,31 @@ elif menu == "Lançamentos":
         valor = c2.number_input("Valor Previsto (R$)", min_value=0.0, step=5.0)
         
         c3, c4, c5 = st.columns(3)
-        categoria = c3.text_input("Categoria")
-        metodo_pagamento = c4.selectbox("Método", ["Pix", "Cartão de Crédito", "Boleto", "Dinheiro", "Transferência"])
-        status = c5.selectbox("Status", ["Pendente", "Pago", "Agendado", "Cancelado"])
+        categoria = c3.selectbox("Categoria", CATEGORIAS_DESPESA)
+        metodo_pagamento = c4.selectbox("Método", METODOS_PAGAMENTO)
+        status = c5.selectbox("Status", STATUS_DESPESA)
         
         descricao_input = st.text_input("Descrição")
         
         c6, c7 = st.columns(2)
-        frequencia = c6.selectbox("Frequência", ["Mensal", "Único", "Anual", "Semanal"])
+        frequencia = c6.selectbox("Frequência", FREQUENCIAS)
         recorrente = "Não" if frequencia == "Único" else "Sim"
         valor_pago = c7.number_input("Valor Pago (R$)", min_value=0.0, step=5.0)
         observacao = st.text_area("Observação")
         
         if st.form_submit_button("Salvar Lançamento"):
-            if descricao_input and categoria:
+            erros, descricao_ok, categoria_ok = validar_lancamento_despesa(
+                data=data,
+                descricao=descricao_input,
+                categoria=categoria,
+                valor=valor,
+                valor_pago=valor_pago,
+                status=status
+            )
+            if erros:
+                for erro in erros:
+                    st.warning(erro)
+            else:
                 if valor == 0 and valor_pago > 0:
                     valor = valor_pago
                 conn = get_personal_connection()
@@ -606,12 +669,10 @@ elif menu == "Lançamentos":
                     INSERT INTO lancamentos 
                     (data, descricao, valor, observacao, recorrente, status, categoria, metodo_pagamento, frequencia, valor_pago)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (str(data), descricao_input, valor, observacao, recorrente, status, categoria, metodo_pagamento, frequencia, valor_pago))
+                """, (str(data), descricao_ok, valor, observacao, recorrente, status, categoria_ok, metodo_pagamento, frequencia, valor_pago))
                 conn.commit()
                 conn.close()
                 st.success("Salvo com sucesso!")
-            else:
-                st.warning("Preencha Descrição e Categoria.")
 
 # ==========================================
 # GERAR RECORRENTES
