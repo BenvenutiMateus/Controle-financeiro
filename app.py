@@ -90,17 +90,7 @@ def get_google_calendar_service():
             creds.refresh(Request())
         else:
             if not os.path.exists('credentials.json'):
-                st.warning("Arquivo credentials.jsoFile "/mount/src/controle-financeiro/app.py", line 454, in <module>
-    df_exibicao = df[["id", "Excluir", "data", "descricao", "valor", "categoria", "recorrente", "frequencia", "observacao"]]
-                  ~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-File "/home/adminuser/venv/lib/python3.13/site-packages/pandas/core/frame.py", line 4384, in __getitem__
-    indexer = self.columns._get_indexer_strict(key, "columns")[1]
-              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
-File "/home/adminuser/venv/lib/python3.13/site-packages/pandas/core/indexes/base.py", line 6302, in _get_indexer_strict
-    self._raise_if_missing(keyarr, indexer, axis_name)
-    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-File "/home/adminuser/venv/lib/python3.13/site-packages/pandas/core/indexes/base.py", line 6355, in _raise_if_missing
-    raise KeyError(f"{not_found} not in index")n não encontrado. A integração com o Google Calendar está desativada.")
+                st.warning("Arquivo credentials.json não encontrado. A integração com o Google Calendar está desativada.")
                 return None
             flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
             creds = flow.run_local_server(port=0)
@@ -259,7 +249,7 @@ if st.sidebar.button("Sair"):
 st.sidebar.divider()
 menu_principal = st.sidebar.selectbox(
     "Módulo",
-    ["Dashboard", "Finanças", "Tarefas", "Agenda", "Estudos", "Projetos"]
+    ["Dashboard", "Finanças", "Tarefas"]
 )
 
 st.sidebar.divider()
@@ -1006,8 +996,6 @@ elif menu_principal == "Dashboard":
     try:
         df_lancamentos = pd.read_sql_query("SELECT * FROM lancamentos", conn)
         df_tarefas = pd.read_sql_query("SELECT * FROM tarefas", conn)
-        df_agenda = pd.read_sql_query("SELECT * FROM agenda", conn)
-        df_projetos = pd.read_sql_query("SELECT * FROM projetos", conn)
     finally:
         conn.close()
 
@@ -1031,30 +1019,12 @@ elif menu_principal == "Dashboard":
         else:
             st.info("Sem tarefas pendentes.")
 
-    with c2:
-        st.subheader("📅 Próximos Compromissos")
-        if not df_agenda.empty:
-            df_agenda["data_hora"] = pd.to_datetime(df_agenda["data_hora"])
-            futuros = df_agenda[df_agenda["data_hora"] >= pd.Timestamp.now()]
-            st.metric("Eventos Futuros", len(futuros))
-        else:
-            st.info("Sem eventos agendados.")
-
-        st.subheader("📈 Progresso dos Projetos")
-        if not df_projetos.empty:
-            andamento = df_projetos[df_projetos['status'] == 'Em andamento']
-            st.metric("Projetos em Andamento", len(andamento))
-        else:
-            st.info("Sem projetos ativos.")
-
     st.divider()
     if st.button("✨ Gerar Resumo com IA (Visão Global)", type="primary"):
         with st.spinner("A IA está analisando sua vida..."):
             resumo_dados = f"""
             Finanças do Mês: Receitas {receitas if not df_lancamentos.empty else 0}, Despesas {despesas if not df_lancamentos.empty else 0}.
             Tarefas Pendentes: {len(df_tarefas[df_tarefas['status'] != 'Concluída']) if not df_tarefas.empty else 0}.
-            Eventos Futuros: {len(df_agenda[pd.to_datetime(df_agenda['data_hora']) >= pd.Timestamp.now()]) if not df_agenda.empty else 0}.
-            Projetos Ativos: {len(df_projetos[df_projetos['status'] == 'Em andamento']) if not df_projetos.empty else 0}.
             """
             prompt_resumo = f"""
             Você é um assistente pessoal inteligente. Com base nos dados abaixo, faça um resumo motivacional
