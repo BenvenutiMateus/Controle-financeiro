@@ -27,7 +27,17 @@ def get_google_calendar_service():
             creds.refresh(Request())
         else:
             if not os.path.exists('credentials.json'):
-                st.warning("Arquivo credentials.json não encontrado. A integração com o Google Calendar está desativada.")
+                st.warning("Arquivo credentials.jsoFile "/mount/src/controle-financeiro/app.py", line 454, in <module>
+    df_exibicao = df[["id", "Excluir", "data", "descricao", "valor", "categoria", "recorrente", "frequencia", "observacao"]]
+                  ~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+File "/home/adminuser/venv/lib/python3.13/site-packages/pandas/core/frame.py", line 4384, in __getitem__
+    indexer = self.columns._get_indexer_strict(key, "columns")[1]
+              ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^
+File "/home/adminuser/venv/lib/python3.13/site-packages/pandas/core/indexes/base.py", line 6302, in _get_indexer_strict
+    self._raise_if_missing(keyarr, indexer, axis_name)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+File "/home/adminuser/venv/lib/python3.13/site-packages/pandas/core/indexes/base.py", line 6355, in _raise_if_missing
+    raise KeyError(f"{not_found} not in index")n não encontrado. A integração com o Google Calendar está desativada.")
                 return None
             flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
             creds = flow.run_local_server(port=0)
