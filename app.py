@@ -1,5 +1,4 @@
 import streamlit as st
-import sqlite3
 import pandas as pd
 import datetime
 from dateutil.relativedelta import relativedelta
@@ -9,14 +8,6 @@ from sklearn.ensemble import RandomForestRegressor
 import libsql_experimental as libsql
 import google.generativeai as genai
 import json
-import os
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
-
-# If modifying these scopes, delete the file token.json.
-SCOPES = ['https://www.googleapis.com/auth/calendar']
 
 CATEGORIAS_DESPESA = [
     "Moradia", "Alimentação", "Transporte", "Saúde", "Educação", "Lazer",
@@ -80,23 +71,6 @@ def validar_receita(data, descricao, categoria, valor):
         erros.append("Valor da receita deve ser maior que zero.")
 
     return erros, descricao, categoria
-
-def get_google_calendar_service():
-    creds = None
-    if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            if not os.path.exists('credentials.json'):
-                st.warning("Arquivo credentials.json não encontrado. A integração com o Google Calendar está desativada.")
-                return None
-            flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-            creds = flow.run_local_server(port=0)
-        with open('token.json', 'w') as token:
-            token.write(creds.to_json())
-    return build('calendar', 'v3', credentials=creds)
 
 def gerar_resposta_ia(prompt, modelo_nome='gemini-3.6-flash'):
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
@@ -414,31 +388,6 @@ def autenticar_usuario(username, senha):
                 data DATE NOT NULL,
                 concluida INTEGER NOT NULL DEFAULT 0,
                 UNIQUE(rotina_id, data)
-            )
-        ''')
-        cursor_p.execute('''
-            CREATE TABLE IF NOT EXISTS agenda (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tipo TEXT NOT NULL,
-                titulo TEXT NOT NULL,
-                data_hora DATETIME
-            )
-        ''')
-        cursor_p.execute('''
-            CREATE TABLE IF NOT EXISTS estudos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tipo TEXT NOT NULL,
-                titulo TEXT NOT NULL,
-                horas REAL,
-                data DATE
-            )
-        ''')
-        cursor_p.execute('''
-            CREATE TABLE IF NOT EXISTS projetos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                categoria TEXT NOT NULL,
-                nome TEXT NOT NULL,
-                status TEXT NOT NULL
             )
         ''')
         conn_p.commit()
