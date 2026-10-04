@@ -885,7 +885,7 @@ elif menu == "Lançamentos":
         else:
             with st.form("form_lancamento"):
                 c1, c2 = st.columns(2)
-                data = c1.date_input("Data", datetime.date.today())
+                data = c1.date_input("Data", datetime.date.today(), format="DD/MM/YYYY")
                 valor = c2.number_input("Valor Previsto (R$)", min_value=0.0, step=5.0)
 
                 c3, c4, c5 = st.columns(3)
